@@ -26,6 +26,9 @@ class RepoCandidate(BaseModel):
     pushed_at: str | None = None
     has_visual_signal: bool = False
     trend_score: float = 0
+    recommendation_reasons: list[str] = Field(default_factory=list)
+    project_kind: Literal["software", "hardware", "mixed", "unknown"] = "unknown"
+    beginner_score: int = Field(default=5, ge=1, le=10)
     files: RepoFiles = Field(default_factory=RepoFiles)
 
 
@@ -83,6 +86,22 @@ class FullAnalysisResult(BaseModel):
     analysis: AnalysisResult
     mentor: MentorResult
     cached: bool = False
+    recommendation_summary: str = ""
+    markdown_export: str = ""
+
+
+class FavoriteRequest(BaseModel):
+    repo: RepoCandidate
+
+
+class ExportMarkdownRequest(BaseModel):
+    repos: list[RepoCandidate] = Field(default_factory=list)
+    analyses: list[FullAnalysisResult] = Field(default_factory=list)
+    ui_language: Literal["zh", "en"] = "zh"
+
+
+class ExportMarkdownResult(BaseModel):
+    markdown: str
 
 
 class ErrorMessage(BaseModel):

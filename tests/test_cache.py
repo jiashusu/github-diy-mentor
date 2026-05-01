@@ -56,3 +56,37 @@ def test_analysis_cache_round_trip(tmp_path, monkeypatch):
     assert cached is not None
     assert cached.cached is True
     assert cached.analysis.plain_summary == "缓存测试。"
+
+
+def test_discovery_cache_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "DISCOVERY_CACHE_PATH", tmp_path / "discovery_cache.json")
+    repo = RepoCandidate(
+        name="demo/discover",
+        url="https://github.com/demo/discover",
+        description="Discovery cache",
+        recommendation_reasons=["7日 +3 stars"],
+        beginner_score=7,
+        project_kind="software",
+    )
+    params = {"days": 7, "limit": 1, "q": "", "ui_language": "zh"}
+
+    assert cache.get_cached_discovery(params) is None
+    cache.set_cached_discovery(params, [repo])
+    cached = cache.get_cached_discovery(params)
+
+    assert cached is not None
+    assert cached[0].name == "demo/discover"
+    assert cached[0].recommendation_reasons == ["7日 +3 stars"]
+
+
+def test_favorites_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "FAVORITES_PATH", tmp_path / "favorites.json")
+    repo = RepoCandidate(
+        name="demo/favorite",
+        url="https://github.com/demo/favorite",
+        description="Favorite demo",
+    )
+
+    assert cache.list_favorites() == []
+    assert cache.add_favorite(repo)[0].name == "demo/favorite"
+    assert cache.remove_favorite("demo/favorite") == []

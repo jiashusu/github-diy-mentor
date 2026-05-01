@@ -10,15 +10,28 @@ from fastapi.staticfiles import StaticFiles
 from app.models import (
     AnalyzeRequest,
     AnalysisResult,
+    ExportMarkdownRequest,
+    ExportMarkdownResult,
+    FavoriteRequest,
     FullAnalysisRequest,
     FullAnalysisResult,
     MentorRequest,
     MentorResult,
     RepoCandidate,
 )
-from app.services.cache import get_cached_analysis, set_cached_analysis
+from app.services.cache import (
+    add_favorite,
+    get_cached_analysis,
+    get_cached_discovery,
+    list_favorites,
+    remove_favorite,
+    set_cached_analysis,
+    set_cached_discovery,
+)
 from app.services.analyst import analyze_repo
+from app.services.exporter import analysis_to_markdown, export_session_markdown
 from app.services.github_scout import GitHubScoutError, discover_repositories
+from app.services.github_scout import recommendation_summary as build_recommendation_summary
 from app.services.mentor import fallback_mentor_result, generate_mentor_result
 from app.services.translation import translate_short_texts
 import httpx
@@ -49,14 +62,38 @@ async def discover(
     sort_mode: str = Query(default="trending", pattern="^(trending|stars|beginner|hardware|software)$"),
 ) -> list[RepoCandidate]:
     try:
-        repos = await discover_repositories(
-            days=days,
-            limit=limit,
-            keyword=q,
-            language_filter=language_filter,
-            topic_filter=topic_filter,
-            sort_mode=sort_mode,
-        )
+        cache_params = {
+            "days": days,
+            "limit": limit,
+            "q": q or "",
+            "ui_language": ui_language,
+            "language_filter": language_filter,
+            "topic_filter": topic_filter,
+            "sort_mode": sort_mode,
+        }
+        repos = get_cached_discovery(cache_params)
+        if repos is None:
+            repos = await discover_repositories(
+                days=days,
+                limit=limit,
+                keyword=q,
+                language_filter=language_filter,
+                topic_filter=topic_filter,
+                sort_mode=sort_mode,
+            )
+            if ui_language == "zh":
+                translations = await translate_short_texts(
+                    {repo.name: repo.description or "" for repo in repos if repo.description},
+                    "zh",
+                )
+                for repo in repos:
+                    repo.description_en = repo.description
+                    repo.description_zh = translations.get(repo.name) or repo.description
+            else:
+                for repo in repos:
+                    repo.description_en = repo.description
+            set_cached_discovery(cache_params, repos)
+            return repos
         if ui_language == "zh":
             translations = await translate_short_texts(
                 {repo.name: repo.description or "" for repo in repos if repo.description},
@@ -86,8 +123,11 @@ async def mentor(request: MentorRequest) -> MentorResult:
 
 
 @app.post("/api/full-analysis", response_model=FullAnalysisResult)
-async def full_analysis(request: FullAnalysisRequest) -> FullAnalysisResult:
-    cached = get_cached_analysis(request.repo, request.ui_language)
+async def full_analysis(
+    request: FullAnalysisRequest,
+    force_refresh: bool = Query(default=False),
+) -> FullAnalysisResult:
+    cached = None if force_refresh else get_cached_analysis(request.repo, request.ui_language)
     if cached:
         return cached
 
@@ -100,6 +140,35 @@ async def full_analysis(request: FullAnalysisRequest) -> FullAnalysisResult:
         mentor_result = await generate_mentor_result(request.repo, analysis, request.ui_language)
     except Exception:
         mentor_result = fallback_mentor_result(request.repo, analysis, request.ui_language)
-    result = FullAnalysisResult(repo=request.repo, analysis=analysis, mentor=mentor_result, cached=False)
+    result = FullAnalysisResult(
+        repo=request.repo,
+        analysis=analysis,
+        mentor=mentor_result,
+        cached=False,
+        recommendation_summary=build_recommendation_summary(request.repo, request.ui_language),
+    )
+    result.markdown_export = analysis_to_markdown(result, request.ui_language)
     set_cached_analysis(request.repo, request.ui_language, result)
     return result
+
+
+@app.get("/api/favorites", response_model=list[RepoCandidate])
+async def favorites() -> list[RepoCandidate]:
+    return list_favorites()
+
+
+@app.post("/api/favorites", response_model=list[RepoCandidate])
+async def save_favorite(request: FavoriteRequest) -> list[RepoCandidate]:
+    return add_favorite(request.repo)
+
+
+@app.delete("/api/favorites/{repo_name:path}", response_model=list[RepoCandidate])
+async def delete_favorite(repo_name: str) -> list[RepoCandidate]:
+    return remove_favorite(repo_name)
+
+
+@app.post("/api/export/markdown", response_model=ExportMarkdownResult)
+async def export_markdown(request: ExportMarkdownRequest) -> ExportMarkdownResult:
+    return ExportMarkdownResult(
+        markdown=export_session_markdown(request.repos, request.analyses, request.ui_language)
+    )

@@ -203,6 +203,37 @@
       font-weight: 700;
     }
 
+    .tag-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .tag {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 11px;
+      color: var(--muted);
+      background: #fbfbf8;
+    }
+
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 10px 0 18px;
+    }
+
+    .empty-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
     .status {
       color: var(--muted);
       font-size: 13px;
@@ -274,6 +305,8 @@
           <label><span data-i18n="days">天数</span> <input id="days" type="number" min="1" max="30" value="7"></label>
           <label><span data-i18n="limit">数量</span> <input id="limit" type="number" min="1" max="50" value="12"></label>
           <button id="discover" data-i18n="discover">发现项目</button>
+          <button id="favoritesToggle" class="secondary" data-i18n="favoritesOnly">只看收藏</button>
+          <button id="exportMarkdown" class="secondary" data-i18n="export">导出</button>
           <button class="lang-toggle active" data-lang="zh">中文</button>
           <button class="lang-toggle" data-lang="en">English</button>
         </div>
@@ -324,6 +357,8 @@
     const repoList = document.querySelector("#repoList");
     const detail = document.querySelector("#detail");
     const discoverButton = document.querySelector("#discover");
+    const favoritesToggle = document.querySelector("#favoritesToggle");
+    const exportButton = document.querySelector("#exportMarkdown");
     const state = {
       language: "zh",
       language_filter: "all",
@@ -332,9 +367,11 @@
       repos: [],
       selectedName: "",
       loadingName: "",
-      analysisCache: new Map()
+      analysisCache: new Map(),
+      favorites: new Map(),
+      showFavoritesOnly: false,
+      currentResult: null
     };
-    let selectedName = "";
 
     const labels = {
       zh: {
@@ -363,7 +400,20 @@
         capability: "AI 能力：",
         useful: "为什么有用：",
         forWhom: "适合：",
-        cached: "已从缓存加载"
+        cached: "已从缓存加载",
+        favoritesOnly: "只看收藏",
+        allResults: "看全部",
+        export: "导出",
+        favorite: "收藏",
+        unfavorite: "取消收藏",
+        regenerate: "重新生成",
+        copyMarkdown: "复制 DIY 方案",
+        why: "为什么值得看",
+        beginner: "新手分",
+        kind: "类型",
+        copied: "已复制",
+        broaden30: "扩大到 30 天",
+        resetTopic: "切回全部主题"
       },
       en: {
         title: "GitHub Fun Finder & AI DIY Mentor",
@@ -391,7 +441,20 @@
         capability: "AI capability: ",
         useful: "Why useful: ",
         forWhom: "For: ",
-        cached: "Loaded from cache"
+        cached: "Loaded from cache",
+        favoritesOnly: "Favorites",
+        allResults: "All Results",
+        export: "Export",
+        favorite: "Favorite",
+        unfavorite: "Unfavorite",
+        regenerate: "Regenerate",
+        copyMarkdown: "Copy DIY Plan",
+        why: "Why It Is Worth Checking",
+        beginner: "Beginner",
+        kind: "Kind",
+        copied: "Copied",
+        broaden30: "Expand to 30 days",
+        resetTopic: "Reset topic"
       }
     };
 
@@ -423,19 +486,53 @@
       return repo.description_en || repo.description || "No description";
     }
 
-    function renderRepos(repos = state.repos) {
+    function displayedRepos() {
+      if (!state.showFavoritesOnly) return state.repos;
+      return state.repos.filter(repo => state.favorites.has(repo.name));
+    }
+
+    function kindLabel(kind) {
+      const zh = {software: "纯软", hardware: "硬件", mixed: "软硬结合", unknown: "未知"};
+      const en = {software: "Software", hardware: "Hardware", mixed: "Mixed", unknown: "Unknown"};
+      return (state.language === "zh" ? zh : en)[kind] || kind;
+    }
+
+    function renderRepos(repos = displayedRepos()) {
       if (!repos.length) {
-        repoList.innerHTML = `<div class="empty">${escapeHtml(t("noResults"))}</div>`;
+        repoList.innerHTML = `
+          <div class="empty">
+            ${escapeHtml(t("noResults"))}
+            <div class="empty-actions">
+              <button class="secondary" id="broadenDays">${escapeHtml(t("broaden30"))}</button>
+              <button class="secondary" id="resetTopic">${escapeHtml(t("resetTopic"))}</button>
+            </div>
+          </div>`;
+        document.querySelector("#broadenDays")?.addEventListener("click", () => {
+          document.querySelector("#days").value = 30;
+          discover();
+        });
+        document.querySelector("#resetTopic")?.addEventListener("click", () => {
+          state.topic_filter = "all";
+          document.querySelectorAll('[data-filter="topic_filter"] .chip').forEach(chip => {
+            chip.classList.toggle("active", chip.dataset.value === "all");
+          });
+          discover();
+        });
         return;
       }
       repoList.innerHTML = repos.map((repo, index) => `
         <button class="repo ${repo.name === state.selectedName ? "active" : ""} ${repo.name === state.loadingName ? "loading" : ""}" data-index="${index}">
-          <strong>${escapeHtml(repo.name)}</strong>
+          <strong>${state.favorites.has(repo.name) ? "★ " : ""}${escapeHtml(repo.name)}</strong>
           <p>${escapeHtml(repoDescription(repo))}</p>
           <span class="meta">
             <span>★ ${repo.stars_total}</span>
             <span>${state.language === "zh" ? "7日" : "7d"} +${repo.stars_last_7d_estimate}</span>
             <span>${escapeHtml(repo.language || "Unknown")}</span>
+            <span>${escapeHtml(t("beginner"))} ${repo.beginner_score}/10</span>
+            <span>${escapeHtml(kindLabel(repo.project_kind))}</span>
+          </span>
+          <span class="tag-row">
+            ${(repo.recommendation_reasons || []).slice(0, 4).map(reason => `<span class="tag">${escapeHtml(reason)}</span>`).join("")}
           </span>
         </button>
       `).join("");
@@ -469,6 +566,8 @@
         const response = await fetch(url);
         if (!response.ok) throw new Error(await readError(response));
         state.repos = await response.json();
+        state.showFavoritesOnly = false;
+        favoritesToggle.textContent = t("favoritesOnly");
         renderRepos();
       } catch (error) {
         repoList.innerHTML = `<div class="empty">${escapeHtml(t("failed") + error.message)}</div>`;
@@ -477,12 +576,12 @@
       }
     }
 
-    async function analyzeRepo(repo) {
+    async function analyzeRepo(repo, forceRefresh = false) {
       state.selectedName = repo.name;
       state.loadingName = repo.name;
       renderRepos();
       const cacheKey = `${repo.name}|${repo.pushed_at || ""}|${state.language}`;
-      if (state.analysisCache.has(cacheKey)) {
+      if (!forceRefresh && state.analysisCache.has(cacheKey)) {
         state.loadingName = "";
         renderDetail(state.analysisCache.get(cacheKey));
         renderRepos();
@@ -490,7 +589,7 @@
       }
       detail.innerHTML = `<h2>${escapeHtml(repo.name)}</h2><p class="status">${escapeHtml(t("analyzing"))}</p>`;
       try {
-        const response = await fetch("/api/full-analysis", {
+        const response = await fetch(`/api/full-analysis?force_refresh=${forceRefresh ? "true" : "false"}`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({repo, ui_language: state.language})
@@ -508,10 +607,23 @@
     }
 
     function renderDetail(result) {
+      state.currentResult = result;
       const {repo, analysis, mentor} = result;
       detail.innerHTML = `
         <h2>${escapeHtml(repo.name)}</h2>
         <p><a href="${escapeHtml(repo.url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openGithub"))}</a>${result.cached ? ` · <span class="badge">${escapeHtml(t("cached"))}</span>` : ""}</p>
+        <div class="detail-actions">
+          <button class="secondary" id="favoriteDetail">${escapeHtml(state.favorites.has(repo.name) ? t("unfavorite") : t("favorite"))}</button>
+          <button class="secondary" id="copyMarkdown">${escapeHtml(t("copyMarkdown"))}</button>
+          <button class="secondary" id="regenerate">${escapeHtml(t("regenerate"))}</button>
+        </div>
+        <h3>${escapeHtml(t("why"))}</h3>
+        <p>${escapeHtml(result.recommendation_summary || "")}</p>
+        <div class="tag-row">
+          ${(repo.recommendation_reasons || []).map(reason => `<span class="tag">${escapeHtml(reason)}</span>`).join("")}
+          <span class="tag">${escapeHtml(t("beginner"))} ${repo.beginner_score}/10</span>
+          <span class="tag">${escapeHtml(t("kind"))}: ${escapeHtml(kindLabel(repo.project_kind))}</span>
+        </div>
         <h3>${escapeHtml(t("summary"))}</h3>
         <p>${escapeHtml(analysis.plain_summary)}</p>
         <h3>${escapeHtml(t("difficulty"))}</h3>
@@ -536,6 +648,9 @@
         <h3>${escapeHtml(t("pitfalls"))}</h3>
         <ul>${mentor.pitfalls.map(pitfall => `<li><strong>${escapeHtml(pitfall.platform)}：</strong>${escapeHtml(pitfall.symptom)}；${escapeHtml(pitfall.fix)}</li>`).join("")}</ul>
       `;
+      document.querySelector("#favoriteDetail").addEventListener("click", () => toggleFavorite(repo));
+      document.querySelector("#copyMarkdown").addEventListener("click", copyCurrentMarkdown);
+      document.querySelector("#regenerate").addEventListener("click", () => analyzeRepo(repo, true));
     }
 
     async function readError(response) {
@@ -549,7 +664,67 @@
       }
     }
 
+    async function loadFavorites() {
+      try {
+        const response = await fetch("/api/favorites");
+        if (!response.ok) return;
+        const favorites = await response.json();
+        state.favorites = new Map(favorites.map(repo => [repo.name, repo]));
+        renderRepos();
+      } catch {}
+    }
+
+    async function toggleFavorite(repo) {
+      const isFavorite = state.favorites.has(repo.name);
+      const url = isFavorite ? `/api/favorites/${encodeURIComponent(repo.name)}` : "/api/favorites";
+      const options = isFavorite
+        ? {method: "DELETE"}
+        : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({repo})};
+      const response = await fetch(url, options);
+      if (!response.ok) throw new Error(await readError(response));
+      const favorites = await response.json();
+      state.favorites = new Map(favorites.map(item => [item.name, item]));
+      if (state.currentResult?.repo?.name === repo.name) renderDetail(state.currentResult);
+      renderRepos();
+    }
+
+    async function copyCurrentMarkdown() {
+      if (!state.currentResult) return;
+      const markdown = state.currentResult.markdown_export || "";
+      await navigator.clipboard.writeText(markdown);
+      const button = document.querySelector("#copyMarkdown");
+      if (button) {
+        const original = button.textContent;
+        button.textContent = t("copied");
+        setTimeout(() => { button.textContent = original; }, 1200);
+      }
+    }
+
+    async function exportMarkdown() {
+      const analyses = Array.from(state.analysisCache.values());
+      const response = await fetch("/api/export/markdown", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({repos: state.repos, analyses, ui_language: state.language})
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = await response.json();
+      const blob = new Blob([data.markdown], {type: "text/markdown;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "github-diy-mentor-export.md";
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
     discoverButton.addEventListener("click", discover);
+    favoritesToggle.addEventListener("click", () => {
+      state.showFavoritesOnly = !state.showFavoritesOnly;
+      favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
+      renderRepos();
+    });
+    exportButton.addEventListener("click", exportMarkdown);
     document.querySelector("#query").addEventListener("keydown", event => {
       if (event.key === "Enter") discover();
     });
@@ -590,9 +765,11 @@
       if (!state.repos.length) {
         repoList.innerHTML = `<div class="empty">${escapeHtml(t("start"))}</div>`;
       }
+      favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
     }
 
     applyLanguage();
+    loadFavorites();
   </script>
 </body>
 </html>

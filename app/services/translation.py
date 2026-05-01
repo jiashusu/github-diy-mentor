@@ -4,6 +4,8 @@ import json
 import os
 import re
 
+from app.services.cache import get_cached_translations, set_cached_translations
+
 
 def contains_cjk(text: str | None) -> bool:
     if not text:
@@ -23,10 +25,15 @@ async def translate_short_texts(texts: dict[str, str], target_language: str) -> 
         return {}
     if target_language == "en":
         return cleaned
+    cached, missing = get_cached_translations(cleaned, target_language)
+    if not missing:
+        return cached
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return localize_static(cleaned, target_language)
+        translated = localize_static(missing, target_language)
+        set_cached_translations(missing, translated, target_language)
+        return {**cached, **translated}
 
     try:
         from openai import AsyncOpenAI
@@ -44,15 +51,17 @@ async def translate_short_texts(texts: dict[str, str], target_language: str) -> 
                         "Return JSON with the exact same keys. Do not add commentary."
                     ),
                 },
-                {"role": "user", "content": json.dumps(cleaned, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(missing, ensure_ascii=False)},
             ],
             temperature=0.2,
         )
         content = response.choices[0].message.content or "{}"
         translated = json.loads(content)
-        return {key: str(translated.get(key, value)) for key, value in cleaned.items()}
+        result = {key: str(translated.get(key, value)) for key, value in missing.items()}
     except Exception:
-        return localize_static(cleaned, target_language)
+        result = localize_static(missing, target_language)
+    set_cached_translations(missing, result, target_language)
+    return {**cached, **result}
 
 
 def _simple_zh(text: str) -> str:

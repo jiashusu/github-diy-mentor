@@ -223,6 +223,9 @@ def summarize_repo(repo: dict[str, Any], since: datetime, search_terms: list[str
     life_keyword_bonus = min(12, sum(2 for keyword in LIFE_KEYWORDS if keyword in _repo_text(repo)))
     search_bonus = min(20, sum(5 for term in search_terms or [] if term.lower() in _repo_text(repo)))
     trend_score = recent_stars * 3 + repo.get("stargazerCount", 0) * 0.01 + visual_bonus + life_keyword_bonus + search_bonus
+    project_kind = _project_kind(repo)
+    beginner_score = _beginner_score(repo)
+    recommendation_reasons = _recommendation_reasons(repo, recent_stars, project_kind, beginner_score)
 
     return RepoCandidate(
         name=repo["nameWithOwner"],
@@ -238,6 +241,9 @@ def summarize_repo(repo: dict[str, Any], since: datetime, search_terms: list[str
         pushed_at=repo.get("pushedAt"),
         has_visual_signal=has_visual_signal(repo),
         trend_score=round(trend_score, 2),
+        recommendation_reasons=recommendation_reasons,
+        project_kind=project_kind,
+        beginner_score=beginner_score,
         files=RepoFiles(
             readme=(repo.get("readme") or {}).get("text") or "",
             package_json=(repo.get("packageJson") or {}).get("text") or "",
@@ -413,7 +419,72 @@ def _sort_score(repo: RepoCandidate, sort_mode: str) -> float:
         hardware_penalty = sum(10 for term in HARDWARE_TERMS if term in text)
         software_bonus = sum(6 for term in SOFTWARE_ONLY_TERMS if term in text)
         return repo.trend_score + software_bonus - hardware_penalty
-    return repo.trend_score
+    giant_penalty = min(35, repo.stars_total / 2500)
+    return repo.trend_score + repo.beginner_score * 1.2 - giant_penalty
+
+
+def recommendation_summary(repo: RepoCandidate, ui_language: str = "zh") -> str:
+    reasons = repo.recommendation_reasons[:4]
+    if ui_language == "en":
+        if not reasons:
+            return "This project matched the current search and ranking filters."
+        return "Worth checking because: " + ", ".join(reasons) + "."
+    if not reasons:
+        return "它命中了当前搜索和筛选条件，值得进一步查看。"
+    return "值得看，因为：" + "、".join(reasons) + "。"
+
+
+def _project_kind(repo: dict[str, Any]) -> str:
+    text = _repo_text(repo)
+    has_hardware = any(term in text for term in HARDWARE_TERMS)
+    has_software = any(term in text for term in SOFTWARE_ONLY_TERMS)
+    if has_hardware and has_software:
+        return "mixed"
+    if has_hardware:
+        return "hardware"
+    if has_software:
+        return "software"
+    return "unknown"
+
+
+def _beginner_score(repo: dict[str, Any]) -> int:
+    readme = ((repo.get("readme") or {}).get("text") or "").lower()
+    package_json = (repo.get("packageJson") or {}).get("text") or ""
+    requirements = (repo.get("requirements") or {}).get("text") or ""
+    score = 5
+    if "docker" in readme:
+        score += 2
+    if any(marker in readme for marker in ["quick start", "quickstart", "installation", "getting started"]):
+        score += 1
+    if has_visual_signal(repo):
+        score += 1
+    if len(package_json) > 6000 or len(requirements.splitlines()) > 25:
+        score -= 2
+    if any(term in readme for term in HARDWARE_TERMS):
+        score -= 1
+    return max(1, min(10, score))
+
+
+def _recommendation_reasons(repo: dict[str, Any], recent_stars: int, project_kind: str, beginner_score: int) -> list[str]:
+    readme = ((repo.get("readme") or {}).get("text") or "").lower()
+    reasons: list[str] = []
+    if recent_stars > 0:
+        reasons.append(f"7日 +{recent_stars} stars")
+    if has_visual_signal(repo):
+        reasons.append("有截图/demo")
+    if "docker" in readme:
+        reasons.append("Docker 可运行")
+    if beginner_score >= 7:
+        reasons.append("新手友好")
+    if project_kind == "hardware":
+        reasons.append("硬件项目")
+    elif project_kind == "software":
+        reasons.append("纯软工具")
+    elif project_kind == "mixed":
+        reasons.append("软硬结合")
+    if len(readme) > 800:
+        reasons.append("README 较清晰")
+    return reasons[:5]
 
 
 def _dedupe_terms(terms: list[str]) -> list[str]:

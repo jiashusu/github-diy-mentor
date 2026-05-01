@@ -10,3 +10,7 @@ dist/
 build/
 *.egg-info/
 data/analysis_cache.json
+data/discovery_cache.json
+data/translation_cache.json
+data/favorites.json
+data/exports/

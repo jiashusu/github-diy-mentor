@@ -50,6 +50,9 @@ def test_summarize_repo_scores_visual_lifestyle_project():
     assert summary.has_visual_signal is True
     assert summary.stars_last_7d_estimate == 1
     assert summary.trend_score > 10
+    assert summary.recommendation_reasons
+    assert summary.project_kind in {"software", "hardware", "mixed", "unknown"}
+    assert 1 <= summary.beginner_score <= 10
 
 
 def test_chinese_keyword_expands_to_github_terms():
