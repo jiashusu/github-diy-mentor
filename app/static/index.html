@@ -512,6 +512,50 @@
       return repo.description_en || repo.description || "No description";
     }
 
+    function localReason(reason) {
+      if (state.language === "zh") return reason;
+      return String(reason)
+        .replace("7日", "7d")
+        .replace("有截图/demo", "Screenshots/demo")
+        .replace("Docker 可运行", "Docker runnable")
+        .replace("新手友好", "Beginner friendly")
+        .replace("硬件项目", "Hardware")
+        .replace("纯软工具", "Software only")
+        .replace("软硬结合", "Hardware + software")
+        .replace("README 较清晰", "Clear README");
+    }
+
+    function localIdeaType(value) {
+      const map = {
+        zh: {"Lazy Plan": "懒人方案", "AI Upgrade": "AI增强版", "懒人方案": "懒人方案", "AI增强版": "AI增强版"},
+        en: {"Lazy Plan": "Lazy Plan", "AI Upgrade": "AI Upgrade", "懒人方案": "Lazy Plan", "AI增强版": "AI Upgrade"}
+      };
+      return map[state.language][value] || value;
+    }
+
+    function localDifficulty(value) {
+      const map = {
+        zh: {Low: "低", Medium: "中", High: "高", "低": "低", "中": "中", "高": "高"},
+        en: {Low: "Low", Medium: "Medium", High: "High", "低": "Low", "中": "Medium", "高": "High"}
+      };
+      return map[state.language][value] || value;
+    }
+
+    function localPlatform(value) {
+      const map = {
+        zh: {General: "通用", "通用": "通用", macOS: "macOS", Windows: "Windows"},
+        en: {General: "General", "通用": "General", macOS: "macOS", Windows: "Windows"}
+      };
+      return map[state.language][value] || value;
+    }
+
+    function localRecommendationSummary(result) {
+      const reasons = (result.repo.recommendation_reasons || []).slice(0, 4).map(localReason);
+      if (!reasons.length) return result.recommendation_summary || "";
+      if (state.language === "en") return `Worth checking because: ${reasons.join(", ")}.`;
+      return `值得看，因为：${reasons.join("、")}。`;
+    }
+
     function displayedRepos() {
       if (!state.showFavoritesOnly) return state.repos;
       return state.repos.filter(repo => state.favorites.has(repo.name));
@@ -558,7 +602,7 @@
             <span>${escapeHtml(kindLabel(repo.project_kind))}</span>
           </span>
           <span class="tag-row">
-            ${(repo.recommendation_reasons || []).slice(0, 4).map(reason => `<span class="tag">${escapeHtml(reason)}</span>`).join("")}
+            ${(repo.recommendation_reasons || []).slice(0, 4).map(reason => `<span class="tag">${escapeHtml(localReason(reason))}</span>`).join("")}
           </span>
         </button>
       `).join("");
@@ -703,9 +747,9 @@
           <button class="secondary" id="regenerate">${escapeHtml(t("regenerate"))}</button>
         </div>
         <h3>${escapeHtml(t("why"))}</h3>
-        <p>${escapeHtml(result.recommendation_summary || "")}</p>
+        <p>${escapeHtml(localRecommendationSummary(result))}</p>
         <div class="tag-row">
-          ${(repo.recommendation_reasons || []).map(reason => `<span class="tag">${escapeHtml(reason)}</span>`).join("")}
+          ${(repo.recommendation_reasons || []).map(reason => `<span class="tag">${escapeHtml(localReason(reason))}</span>`).join("")}
           <span class="tag">${escapeHtml(t("beginner"))} ${repo.beginner_score}/10</span>
           <span class="tag">${escapeHtml(t("kind"))}: ${escapeHtml(kindLabel(repo.project_kind))}</span>
         </div>
@@ -721,7 +765,7 @@
         <p>${escapeHtml(mentor.overall_angle)}</p>
         ${mentor.ideas.map(idea => `
           <div class="idea">
-            <span class="badge">${escapeHtml(idea.type)} · ${escapeHtml(idea.difficulty)}</span>
+            <span class="badge">${escapeHtml(localIdeaType(idea.type))} · ${escapeHtml(localDifficulty(idea.difficulty))}</span>
             <h3>${escapeHtml(idea.title)}</h3>
             <p>${escapeHtml(idea.direction)}</p>
             <p><strong>${escapeHtml(t("forWhom"))}</strong>${escapeHtml(idea.for_whom)}</p>
@@ -731,7 +775,7 @@
           </div>
         `).join("")}
         <h3>${escapeHtml(t("pitfalls"))}</h3>
-        <ul>${mentor.pitfalls.map(pitfall => `<li><strong>${escapeHtml(pitfall.platform)}：</strong>${escapeHtml(pitfall.symptom)}；${escapeHtml(pitfall.fix)}</li>`).join("")}</ul>
+        <ul>${mentor.pitfalls.map(pitfall => `<li><strong>${escapeHtml(localPlatform(pitfall.platform))}${state.language === "en" ? ":" : "："}</strong>${escapeHtml(pitfall.symptom)}${state.language === "en" ? "; " : "；"}${escapeHtml(pitfall.fix)}</li>`).join("")}</ul>
       `;
       document.querySelector("#favoriteDetail").addEventListener("click", () => toggleFavorite(repo));
       document.querySelector("#copyMarkdown").addEventListener("click", copyCurrentMarkdown);
@@ -755,7 +799,7 @@
         if (!response.ok) return;
         const favorites = await response.json();
         state.favorites = new Map(favorites.map(repo => [repo.name, repo]));
-        renderRepos();
+        if (state.repos.length || state.showFavoritesOnly) renderRepos();
       } catch {}
     }
 
@@ -834,7 +878,14 @@
         button.classList.add("active");
         applyLanguage();
         if (state.repos.length) renderRepos();
-        if (!state.selectedName) detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
+        if (state.selectedName) {
+          const repo = state.repos.find(item => item.name === state.selectedName);
+          if (repo) {
+            analyzeRepo(repo);
+            return;
+          }
+        }
+        detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
       });
     });
 
