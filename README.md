@@ -1,5 +1,7 @@
 # GitHub DIY Mentor
 
+[中文说明](README_zh.md)
+
 GitHub DIY Mentor is a small FastAPI web app that finds practical, playful GitHub projects and explains how ordinary users can improve them with AI.
 
 This is the first raw version of the project: simple local UI, GitHub discovery, README/dependency analysis, and AI-generated DIY upgrade ideas.
@@ -11,7 +13,10 @@ This is the first raw version of the project: simple local UI, GitHub discovery,
 - Supports Chinese and English UI/output modes.
 - Translates project descriptions into Chinese with the user's OpenAI API key, while keeping repository names, commands, languages, and technical terms intact.
 - Provides movie-picker-style filters for language, topic, and ranking strategy.
-- Caches generated project analysis locally to avoid repeated token usage.
+- Explains why each project is recommended with compact reason tags.
+- Caches discovery results, translations, and generated project analysis locally to avoid repeated token usage.
+- Supports local favorites and "favorites only" browsing.
+- Exports the current project list and generated DIY suggestions as Markdown.
 - Keeps the selected project highlighted while analysis is loading or displayed.
 - Reads README, `package.json`, and `requirements.txt` when available.
 - Generates:
@@ -88,6 +93,10 @@ Click a project in the result list to generate the analysis and DIY mentor sugge
 
 Generated analysis is cached by repository, update time, and UI language. Clicking the same project again loads from cache instead of calling OpenAI again.
 
+Project cards include recommendation tags such as recent star growth, visual demo/screenshot signals, Docker availability, beginner friendliness, and software/hardware type.
+
+Use **收藏 / Favorite** to save projects locally. Use **导出 / Export** to download the current list and generated DIY plans as Markdown.
+
 ## Terminal Usage
 
 Discover projects:
@@ -126,6 +135,7 @@ python -m pytest
 
 - `.env` is ignored by Git and should never be committed.
 - `data/analysis_cache.json` is generated locally and ignored by Git.
+- `data/discovery_cache.json`, `data/translation_cache.json`, and `data/favorites.json` are also generated locally and ignored by Git.
 - GitHub discovery requires `GITHUB_TOKEN`.
 - AI mentor generation uses OpenAI when `OPENAI_API_KEY` is configured.
 - If the OpenAI call fails, the app falls back to local DIY suggestions instead of crashing.
@@ -140,6 +150,14 @@ python -m pytest
 - Added local analysis caching to reduce repeated OpenAI token usage.
 - Improved the project list interaction with persistent selected-project highlighting.
 - Removed the fixed Chinese summary prefix and made summaries more natural.
+
+### 2026-05-01 / v0.3
+
+- Added recommendation reason tags to project cards and detail pages.
+- Added local discovery and translation caches.
+- Added favorites, favorites-only browsing, and Markdown export.
+- Added a force-refresh path for regenerating project analysis when needed.
+- Improved empty states with quick actions for broader discovery.
 
 ## License
 
