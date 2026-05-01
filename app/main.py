@@ -60,8 +60,10 @@ async def discover(
     language_filter: str = Query(default="all", pattern="^(all|zh|en|other)$"),
     topic_filter: str = Query(default="all", pattern="^(all|ai|finance|home|media|game|productivity|humanities)$"),
     sort_mode: str = Query(default="trending", pattern="^(trending|stars|beginner|hardware|software)$"),
+    exclude: str | None = Query(default=None),
 ) -> list[RepoCandidate]:
     try:
+        exclude_names = {name for name in (exclude or "").split(",") if name}
         cache_params = {
             "days": days,
             "limit": limit,
@@ -70,6 +72,7 @@ async def discover(
             "language_filter": language_filter,
             "topic_filter": topic_filter,
             "sort_mode": sort_mode,
+            "exclude": sorted(exclude_names),
         }
         repos = get_cached_discovery(cache_params)
         if repos is None:
@@ -80,6 +83,7 @@ async def discover(
                 language_filter=language_filter,
                 topic_filter=topic_filter,
                 sort_mode=sort_mode,
+                exclude_names=exclude_names,
             )
             if ui_language == "zh":
                 translations = await translate_short_texts(

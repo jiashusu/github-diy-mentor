@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
-from app.services.github_scout import _sort_score, count_recent_stars, looks_life_useful, normalize_search_terms, summarize_repo
+from app.services.github_scout import _sort_score, count_recent_stars, discover_repositories, looks_life_useful, normalize_search_terms, summarize_repo
 
 
 def repo_fixture(**overrides):
@@ -66,3 +67,18 @@ def test_sort_modes_score_expected_signals():
     summary = summarize_repo(repo_fixture(description="ESP32 smart home sensor dashboard"), since)
     assert _sort_score(summary, "stars") == summary.stars_total
     assert _sort_score(summary, "hardware") > summary.trend_score
+
+
+def test_discover_excludes_seen_repositories(monkeypatch):
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    first = summarize_repo(repo_fixture(nameWithOwner="demo/first"), since)
+    second = summarize_repo(repo_fixture(nameWithOwner="demo/second"), since)
+
+    async def fake_run_topic_searches(*args, **kwargs):
+        return [[first, second]]
+
+    monkeypatch.setattr("app.services.github_scout._run_topic_searches", fake_run_topic_searches)
+
+    repos = asyncio.run(discover_repositories(limit=2, exclude_names={"demo/first"}))
+
+    assert [repo.name for repo in repos] == ["demo/second"]

@@ -234,6 +234,18 @@
       margin-top: 12px;
     }
 
+    .batch-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      background: #fbfbf8;
+    }
+
+    .batch-actions button {
+      flex: 1;
+    }
+
     .status {
       color: var(--muted);
       font-size: 13px;
@@ -346,6 +358,10 @@
       <div id="repoList" class="repo-list">
         <div class="empty">点击“发现项目”开始。需要先在 `.env` 配置 `GITHUB_TOKEN`。</div>
       </div>
+      <div class="batch-actions">
+        <button id="previousBatch" class="secondary" disabled>上一批</button>
+        <button id="nextBatch" class="secondary" disabled>换一批</button>
+      </div>
     </section>
     <section class="panel">
       <div id="detail" class="detail">
@@ -359,6 +375,8 @@
     const discoverButton = document.querySelector("#discover");
     const favoritesToggle = document.querySelector("#favoritesToggle");
     const exportButton = document.querySelector("#exportMarkdown");
+    const previousBatchButton = document.querySelector("#previousBatch");
+    const nextBatchButton = document.querySelector("#nextBatch");
     const state = {
       language: "zh",
       language_filter: "all",
@@ -370,7 +388,9 @@
       analysisCache: new Map(),
       favorites: new Map(),
       showFavoritesOnly: false,
-      currentResult: null
+      currentResult: null,
+      batches: [],
+      batchIndex: -1
     };
 
     const labels = {
@@ -413,7 +433,10 @@
         kind: "类型",
         copied: "已复制",
         broaden30: "扩大到 30 天",
-        resetTopic: "切回全部主题"
+        resetTopic: "切回全部主题",
+        previousBatch: "上一批",
+        nextBatch: "换一批",
+        noMoreBatch: "没有更多新项目了"
       },
       en: {
         title: "GitHub Fun Finder & AI DIY Mentor",
@@ -454,7 +477,10 @@
         kind: "Kind",
         copied: "Copied",
         broaden30: "Expand to 30 days",
-        resetTopic: "Reset topic"
+        resetTopic: "Reset topic",
+        previousBatch: "Previous",
+        nextBatch: "Next batch",
+        noMoreBatch: "No more new projects"
       }
     };
 
@@ -539,13 +565,31 @@
       repoList.querySelectorAll(".repo").forEach(button => {
         button.addEventListener("click", () => analyzeRepo(repos[Number(button.dataset.index)]));
       });
+      renderBatchControls();
     }
 
-    async function discover() {
+    function renderBatchControls() {
+      previousBatchButton.textContent = t("previousBatch");
+      nextBatchButton.textContent = t("nextBatch");
+      previousBatchButton.disabled = state.batchIndex <= 0 || discoverButton.disabled;
+      nextBatchButton.disabled = !state.repos.length || state.showFavoritesOnly || discoverButton.disabled;
+    }
+
+    function allSeenNames() {
+      return Array.from(new Set(state.batches.flat().map(repo => repo.name)));
+    }
+
+    async function discover(options = {}) {
+      const appendBatch = options.appendBatch || false;
       discoverButton.disabled = true;
+      renderBatchControls();
       state.selectedName = "";
       state.loadingName = "";
-      state.repos = [];
+      if (!appendBatch) {
+        state.repos = [];
+        state.batches = [];
+        state.batchIndex = -1;
+      }
       repoList.innerHTML = `<div class="empty">${escapeHtml(t("discovering"))}</div>`;
       detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
       try {
@@ -561,11 +605,28 @@
           topic_filter: state.topic_filter,
           sort_mode: state.sort_mode
         });
+        if (appendBatch) {
+          const excludeNames = allSeenNames();
+          if (excludeNames.length) params.set("exclude", excludeNames.join(","));
+        }
         if (rawQuery) params.set("q", rawQuery);
         const url = `/api/discover?${params.toString()}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(await readError(response));
-        state.repos = await response.json();
+        const repos = await response.json();
+        if (appendBatch) {
+          if (!repos.length) {
+            repoList.innerHTML = `<div class="empty">${escapeHtml(t("noMoreBatch"))}</div>`;
+            return;
+          }
+          state.batches.push(repos);
+          state.batchIndex = state.batches.length - 1;
+          state.repos = repos;
+        } else {
+          state.batches = [repos];
+          state.batchIndex = 0;
+          state.repos = repos;
+        }
         state.showFavoritesOnly = false;
         favoritesToggle.textContent = t("favoritesOnly");
         renderRepos();
@@ -573,7 +634,31 @@
         repoList.innerHTML = `<div class="empty">${escapeHtml(t("failed") + error.message)}</div>`;
       } finally {
         discoverButton.disabled = false;
+        renderBatchControls();
       }
+    }
+
+    function showPreviousBatch() {
+      if (state.batchIndex <= 0) return;
+      state.batchIndex -= 1;
+      state.repos = state.batches[state.batchIndex];
+      state.selectedName = "";
+      state.loadingName = "";
+      detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
+      renderRepos();
+    }
+
+    function showNextBatch() {
+      if (state.batchIndex < state.batches.length - 1) {
+        state.batchIndex += 1;
+        state.repos = state.batches[state.batchIndex];
+        state.selectedName = "";
+        state.loadingName = "";
+        detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
+        renderRepos();
+        return;
+      }
+      discover({appendBatch: true});
     }
 
     async function analyzeRepo(repo, forceRefresh = false) {
@@ -718,7 +803,9 @@
       URL.revokeObjectURL(url);
     }
 
-    discoverButton.addEventListener("click", discover);
+    discoverButton.addEventListener("click", () => discover());
+    previousBatchButton.addEventListener("click", showPreviousBatch);
+    nextBatchButton.addEventListener("click", showNextBatch);
     favoritesToggle.addEventListener("click", () => {
       state.showFavoritesOnly = !state.showFavoritesOnly;
       favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
@@ -766,10 +853,12 @@
         repoList.innerHTML = `<div class="empty">${escapeHtml(t("start"))}</div>`;
       }
       favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
+      renderBatchControls();
     }
 
     applyLanguage();
     loadFavorites();
+    renderBatchControls();
   </script>
 </body>
 </html>

@@ -334,15 +334,20 @@ async def discover_repositories(
     language_filter: str = "all",
     topic_filter: str = "all",
     sort_mode: str = "trending",
+    exclude_names: set[str] | None = None,
 ) -> list[RepoCandidate]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     search_terms = _dedupe_terms([*normalize_search_terms(keyword), *TOPIC_FILTER_TERMS.get(topic_filter, [])])
     async with httpx.AsyncClient() as client:
-        batches = await _run_topic_searches(client, since, per_topic, search_terms, language_filter)
+        fetch_size = max(per_topic, min(50, limit + len(exclude_names or set())))
+        batches = await _run_topic_searches(client, since, fetch_size, search_terms, language_filter)
 
     by_name: dict[str, RepoCandidate] = {}
+    excluded = exclude_names or set()
     for batch in batches:
         for repo in batch:
+            if repo.name in excluded:
+                continue
             by_name[repo.name] = repo
 
     return sorted(
