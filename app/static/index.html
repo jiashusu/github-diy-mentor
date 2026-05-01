@@ -227,6 +227,27 @@
       margin: 10px 0 18px;
     }
 
+    .copy-fallback {
+      margin: 12px 0 18px;
+      padding: 12px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #fbfbf8;
+    }
+
+    .copy-fallback textarea {
+      width: 100%;
+      min-height: 150px;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      resize: vertical;
+      font: inherit;
+      line-height: 1.5;
+      background: #fff;
+    }
+
     .empty-actions {
       display: flex;
       gap: 8px;
@@ -234,16 +255,85 @@
       margin-top: 12px;
     }
 
-    .batch-actions {
+    .page-nav {
       display: flex;
       gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
       padding: 12px;
       border-top: 1px solid var(--line);
       background: #fbfbf8;
     }
 
-    .batch-actions button {
-      flex: 1;
+    .page-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .page-chip,
+    .page-add {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .page-chip.active {
+      border-color: var(--accent);
+      background: #e1f3ef;
+      color: var(--accent);
+    }
+
+    .page-hint {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .toast-region {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      display: grid;
+      gap: 8px;
+      z-index: 40;
+      pointer-events: none;
+    }
+
+    .toast {
+      min-width: 180px;
+      max-width: 320px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      color: var(--text);
+      box-shadow: 0 8px 24px rgba(32, 33, 36, 0.12);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .toast.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast-success {
+      border-color: #86efac;
+    }
+
+    .toast-info {
+      border-color: #93c5fd;
+    }
+
+    .toast-error {
+      border-color: #fca5a5;
     }
 
     .status {
@@ -358,10 +448,7 @@
       <div id="repoList" class="repo-list">
         <div class="empty">点击“发现项目”开始。需要先在 `.env` 配置 `GITHUB_TOKEN`。</div>
       </div>
-      <div class="batch-actions">
-        <button id="previousBatch" class="secondary" disabled>上一批</button>
-        <button id="nextBatch" class="secondary" disabled>换一批</button>
-      </div>
+      <div id="pageNav" class="page-nav"></div>
     </section>
     <section class="panel">
       <div id="detail" class="detail">
@@ -369,547 +456,7 @@
       </div>
     </section>
   </main>
-  <script>
-    const repoList = document.querySelector("#repoList");
-    const detail = document.querySelector("#detail");
-    const discoverButton = document.querySelector("#discover");
-    const favoritesToggle = document.querySelector("#favoritesToggle");
-    const exportButton = document.querySelector("#exportMarkdown");
-    const previousBatchButton = document.querySelector("#previousBatch");
-    const nextBatchButton = document.querySelector("#nextBatch");
-    const state = {
-      language: "zh",
-      language_filter: "all",
-      topic_filter: "all",
-      sort_mode: "trending",
-      repos: [],
-      selectedName: "",
-      loadingName: "",
-      analysisCache: new Map(),
-      favorites: new Map(),
-      showFavoritesOnly: false,
-      currentResult: null,
-      batches: [],
-      batchIndex: -1
-    };
-
-    const labels = {
-      zh: {
-        title: "GitHub 趣事发现器 & AI DIY 导师",
-        search: "搜索",
-        days: "天数",
-        limit: "数量",
-        discover: "发现项目",
-        language: "语言",
-        topic: "主题",
-        sort: "排序",
-        start: "点击“发现项目”开始。需要先在 `.env` 配置 `GITHUB_TOKEN`。",
-        waiting: "等待选择项目。",
-        discovering: "正在从 GitHub 捞有意思的项目...",
-        noResults: "没有找到合适项目。可以扩大天数或稍后再试。",
-        failed: "发现失败：",
-        analyzing: "正在生成解读和 DIY 建议...",
-        analyzeFailed: "分析失败：",
-        openGithub: "打开 GitHub",
-        summary: "一句话白话简介",
-        difficulty: "上手难度",
-        macos: "macOS 门槛",
-        windows: "Windows 门槛",
-        angle: "AI 改造总方向",
-        pitfalls: "避坑指南",
-        capability: "AI 能力：",
-        useful: "为什么有用：",
-        forWhom: "适合：",
-        cached: "已从缓存加载",
-        favoritesOnly: "只看收藏",
-        allResults: "看全部",
-        export: "导出",
-        favorite: "收藏",
-        unfavorite: "取消收藏",
-        regenerate: "重新生成",
-        copyMarkdown: "复制 DIY 方案",
-        why: "为什么值得看",
-        beginner: "新手分",
-        kind: "类型",
-        copied: "已复制",
-        broaden30: "扩大到 30 天",
-        resetTopic: "切回全部主题",
-        previousBatch: "上一批",
-        nextBatch: "换一批",
-        noMoreBatch: "没有更多新项目了"
-      },
-      en: {
-        title: "GitHub Fun Finder & AI DIY Mentor",
-        search: "Search",
-        days: "Days",
-        limit: "Limit",
-        discover: "Discover",
-        language: "Language",
-        topic: "Topic",
-        sort: "Sort",
-        start: "Click Discover to start. Configure GITHUB_TOKEN in `.env` first.",
-        waiting: "Select a project to see analysis and AI DIY suggestions.",
-        discovering: "Finding interesting GitHub projects...",
-        noResults: "No matching projects found. Try more days or a broader filter.",
-        failed: "Discovery failed: ",
-        analyzing: "Generating analysis and DIY suggestions...",
-        analyzeFailed: "Analysis failed: ",
-        openGithub: "Open GitHub",
-        summary: "Plain-language Summary",
-        difficulty: "Setup Difficulty",
-        macos: "macOS Requirements",
-        windows: "Windows Requirements",
-        angle: "AI Upgrade Direction",
-        pitfalls: "Pitfalls",
-        capability: "AI capability: ",
-        useful: "Why useful: ",
-        forWhom: "For: ",
-        cached: "Loaded from cache",
-        favoritesOnly: "Favorites",
-        allResults: "All Results",
-        export: "Export",
-        favorite: "Favorite",
-        unfavorite: "Unfavorite",
-        regenerate: "Regenerate",
-        copyMarkdown: "Copy DIY Plan",
-        why: "Why It Is Worth Checking",
-        beginner: "Beginner",
-        kind: "Kind",
-        copied: "Copied",
-        broaden30: "Expand to 30 days",
-        resetTopic: "Reset topic",
-        previousBatch: "Previous",
-        nextBatch: "Next batch",
-        noMoreBatch: "No more new projects"
-      }
-    };
-
-    const chipLabels = {
-      zh: {
-        language_filter: {all: "全部", zh: "中文", en: "英文", other: "其他"},
-        topic_filter: {all: "全部", ai: "AI 灵感", finance: "量化金融", home: "智能家居", media: "创意媒体", game: "极客游戏", productivity: "效率黑客", humanities: "人文探索"},
-        sort_mode: {trending: "黑马榜", stars: "经典榜", beginner: "新手友好", hardware: "硬件项目", software: "纯软工具"}
-      },
-      en: {
-        language_filter: {all: "All", zh: "Chinese", en: "English", other: "Other"},
-        topic_filter: {all: "All", ai: "AI Ideas", finance: "Quant Finance", home: "Smart Home", media: "Creative Media", game: "Geek Games", productivity: "Productivity", humanities: "Humanities"},
-        sort_mode: {trending: "Trending", stars: "Most Stars", beginner: "Beginner Friendly", hardware: "Hardware", software: "Software Only"}
-      }
-    };
-
-    function escapeHtml(value) {
-      return String(value ?? "").replace(/[&<>"']/g, char => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
-      }[char]));
-    }
-
-    function t(key) {
-      return labels[state.language][key] || labels.zh[key] || key;
-    }
-
-    function repoDescription(repo) {
-      if (state.language === "zh") return repo.description_zh || repo.description || "暂无简介";
-      return repo.description_en || repo.description || "No description";
-    }
-
-    function localReason(reason) {
-      if (state.language === "zh") return reason;
-      return String(reason)
-        .replace("7日", "7d")
-        .replace("有截图/demo", "Screenshots/demo")
-        .replace("Docker 可运行", "Docker runnable")
-        .replace("新手友好", "Beginner friendly")
-        .replace("硬件项目", "Hardware")
-        .replace("纯软工具", "Software only")
-        .replace("软硬结合", "Hardware + software")
-        .replace("README 较清晰", "Clear README");
-    }
-
-    function localIdeaType(value) {
-      const map = {
-        zh: {"Lazy Plan": "懒人方案", "AI Upgrade": "AI增强版", "懒人方案": "懒人方案", "AI增强版": "AI增强版"},
-        en: {"Lazy Plan": "Lazy Plan", "AI Upgrade": "AI Upgrade", "懒人方案": "Lazy Plan", "AI增强版": "AI Upgrade"}
-      };
-      return map[state.language][value] || value;
-    }
-
-    function localDifficulty(value) {
-      const map = {
-        zh: {Low: "低", Medium: "中", High: "高", "低": "低", "中": "中", "高": "高"},
-        en: {Low: "Low", Medium: "Medium", High: "High", "低": "Low", "中": "Medium", "高": "High"}
-      };
-      return map[state.language][value] || value;
-    }
-
-    function localPlatform(value) {
-      const map = {
-        zh: {General: "通用", "通用": "通用", macOS: "macOS", Windows: "Windows"},
-        en: {General: "General", "通用": "General", macOS: "macOS", Windows: "Windows"}
-      };
-      return map[state.language][value] || value;
-    }
-
-    function localRecommendationSummary(result) {
-      const reasons = (result.repo.recommendation_reasons || []).slice(0, 4).map(localReason);
-      if (!reasons.length) return result.recommendation_summary || "";
-      if (state.language === "en") return `Worth checking because: ${reasons.join(", ")}.`;
-      return `值得看，因为：${reasons.join("、")}。`;
-    }
-
-    function displayedRepos() {
-      if (!state.showFavoritesOnly) return state.repos;
-      return state.repos.filter(repo => state.favorites.has(repo.name));
-    }
-
-    function kindLabel(kind) {
-      const zh = {software: "纯软", hardware: "硬件", mixed: "软硬结合", unknown: "未知"};
-      const en = {software: "Software", hardware: "Hardware", mixed: "Mixed", unknown: "Unknown"};
-      return (state.language === "zh" ? zh : en)[kind] || kind;
-    }
-
-    function renderRepos(repos = displayedRepos()) {
-      if (!repos.length) {
-        repoList.innerHTML = `
-          <div class="empty">
-            ${escapeHtml(t("noResults"))}
-            <div class="empty-actions">
-              <button class="secondary" id="broadenDays">${escapeHtml(t("broaden30"))}</button>
-              <button class="secondary" id="resetTopic">${escapeHtml(t("resetTopic"))}</button>
-            </div>
-          </div>`;
-        document.querySelector("#broadenDays")?.addEventListener("click", () => {
-          document.querySelector("#days").value = 30;
-          discover();
-        });
-        document.querySelector("#resetTopic")?.addEventListener("click", () => {
-          state.topic_filter = "all";
-          document.querySelectorAll('[data-filter="topic_filter"] .chip').forEach(chip => {
-            chip.classList.toggle("active", chip.dataset.value === "all");
-          });
-          discover();
-        });
-        return;
-      }
-      repoList.innerHTML = repos.map((repo, index) => `
-        <button class="repo ${repo.name === state.selectedName ? "active" : ""} ${repo.name === state.loadingName ? "loading" : ""}" data-index="${index}">
-          <strong>${state.favorites.has(repo.name) ? "★ " : ""}${escapeHtml(repo.name)}</strong>
-          <p>${escapeHtml(repoDescription(repo))}</p>
-          <span class="meta">
-            <span>★ ${repo.stars_total}</span>
-            <span>${state.language === "zh" ? "7日" : "7d"} +${repo.stars_last_7d_estimate}</span>
-            <span>${escapeHtml(repo.language || "Unknown")}</span>
-            <span>${escapeHtml(t("beginner"))} ${repo.beginner_score}/10</span>
-            <span>${escapeHtml(kindLabel(repo.project_kind))}</span>
-          </span>
-          <span class="tag-row">
-            ${(repo.recommendation_reasons || []).slice(0, 4).map(reason => `<span class="tag">${escapeHtml(localReason(reason))}</span>`).join("")}
-          </span>
-        </button>
-      `).join("");
-      repoList.querySelectorAll(".repo").forEach(button => {
-        button.addEventListener("click", () => analyzeRepo(repos[Number(button.dataset.index)]));
-      });
-      renderBatchControls();
-    }
-
-    function renderBatchControls() {
-      previousBatchButton.textContent = t("previousBatch");
-      nextBatchButton.textContent = t("nextBatch");
-      previousBatchButton.disabled = state.batchIndex <= 0 || discoverButton.disabled;
-      nextBatchButton.disabled = !state.repos.length || state.showFavoritesOnly || discoverButton.disabled;
-    }
-
-    function allSeenNames() {
-      return Array.from(new Set(state.batches.flat().map(repo => repo.name)));
-    }
-
-    async function discover(options = {}) {
-      const appendBatch = options.appendBatch || false;
-      discoverButton.disabled = true;
-      renderBatchControls();
-      state.selectedName = "";
-      state.loadingName = "";
-      if (!appendBatch) {
-        state.repos = [];
-        state.batches = [];
-        state.batchIndex = -1;
-      }
-      repoList.innerHTML = `<div class="empty">${escapeHtml(t("discovering"))}</div>`;
-      detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
-      try {
-        const days = document.querySelector("#days").value;
-        const limit = document.querySelector("#limit").value;
-        const rawQuery = document.querySelector("#query").value.trim();
-        const query = encodeURIComponent(rawQuery);
-        const params = new URLSearchParams({
-          days,
-          limit,
-          ui_language: state.language,
-          language_filter: state.language_filter,
-          topic_filter: state.topic_filter,
-          sort_mode: state.sort_mode
-        });
-        if (appendBatch) {
-          const excludeNames = allSeenNames();
-          if (excludeNames.length) params.set("exclude", excludeNames.join(","));
-        }
-        if (rawQuery) params.set("q", rawQuery);
-        const url = `/api/discover?${params.toString()}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(await readError(response));
-        const repos = await response.json();
-        if (appendBatch) {
-          if (!repos.length) {
-            repoList.innerHTML = `<div class="empty">${escapeHtml(t("noMoreBatch"))}</div>`;
-            return;
-          }
-          state.batches.push(repos);
-          state.batchIndex = state.batches.length - 1;
-          state.repos = repos;
-        } else {
-          state.batches = [repos];
-          state.batchIndex = 0;
-          state.repos = repos;
-        }
-        state.showFavoritesOnly = false;
-        favoritesToggle.textContent = t("favoritesOnly");
-        renderRepos();
-      } catch (error) {
-        repoList.innerHTML = `<div class="empty">${escapeHtml(t("failed") + error.message)}</div>`;
-      } finally {
-        discoverButton.disabled = false;
-        renderBatchControls();
-      }
-    }
-
-    function showPreviousBatch() {
-      if (state.batchIndex <= 0) return;
-      state.batchIndex -= 1;
-      state.repos = state.batches[state.batchIndex];
-      state.selectedName = "";
-      state.loadingName = "";
-      detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
-      renderRepos();
-    }
-
-    function showNextBatch() {
-      if (state.batchIndex < state.batches.length - 1) {
-        state.batchIndex += 1;
-        state.repos = state.batches[state.batchIndex];
-        state.selectedName = "";
-        state.loadingName = "";
-        detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
-        renderRepos();
-        return;
-      }
-      discover({appendBatch: true});
-    }
-
-    async function analyzeRepo(repo, forceRefresh = false) {
-      state.selectedName = repo.name;
-      state.loadingName = repo.name;
-      renderRepos();
-      const cacheKey = `${repo.name}|${repo.pushed_at || ""}|${state.language}`;
-      if (!forceRefresh && state.analysisCache.has(cacheKey)) {
-        state.loadingName = "";
-        renderDetail(state.analysisCache.get(cacheKey));
-        renderRepos();
-        return;
-      }
-      detail.innerHTML = `<h2>${escapeHtml(repo.name)}</h2><p class="status">${escapeHtml(t("analyzing"))}</p>`;
-      try {
-        const response = await fetch(`/api/full-analysis?force_refresh=${forceRefresh ? "true" : "false"}`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({repo, ui_language: state.language})
-        });
-        if (!response.ok) throw new Error(await readError(response));
-        const result = await response.json();
-        state.analysisCache.set(cacheKey, result);
-        renderDetail(result);
-      } catch (error) {
-        detail.innerHTML = `<div class="empty">${escapeHtml(t("analyzeFailed") + error.message)}</div>`;
-      } finally {
-        state.loadingName = "";
-        renderRepos();
-      }
-    }
-
-    function renderDetail(result) {
-      state.currentResult = result;
-      const {repo, analysis, mentor} = result;
-      detail.innerHTML = `
-        <h2>${escapeHtml(repo.name)}</h2>
-        <p><a href="${escapeHtml(repo.url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openGithub"))}</a>${result.cached ? ` · <span class="badge">${escapeHtml(t("cached"))}</span>` : ""}</p>
-        <div class="detail-actions">
-          <button class="secondary" id="favoriteDetail">${escapeHtml(state.favorites.has(repo.name) ? t("unfavorite") : t("favorite"))}</button>
-          <button class="secondary" id="copyMarkdown">${escapeHtml(t("copyMarkdown"))}</button>
-          <button class="secondary" id="regenerate">${escapeHtml(t("regenerate"))}</button>
-        </div>
-        <h3>${escapeHtml(t("why"))}</h3>
-        <p>${escapeHtml(localRecommendationSummary(result))}</p>
-        <div class="tag-row">
-          ${(repo.recommendation_reasons || []).map(reason => `<span class="tag">${escapeHtml(localReason(reason))}</span>`).join("")}
-          <span class="tag">${escapeHtml(t("beginner"))} ${repo.beginner_score}/10</span>
-          <span class="tag">${escapeHtml(t("kind"))}: ${escapeHtml(kindLabel(repo.project_kind))}</span>
-        </div>
-        <h3>${escapeHtml(t("summary"))}</h3>
-        <p>${escapeHtml(analysis.plain_summary)}</p>
-        <h3>${escapeHtml(t("difficulty"))}</h3>
-        <p><span class="badge">${analysis.difficulty_score}/10</span></p>
-        <h3>${escapeHtml(t("macos"))}</h3>
-        <ul>${analysis.macos_requirements.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <h3>${escapeHtml(t("windows"))}</h3>
-        <ul>${analysis.windows_requirements.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <h3>${escapeHtml(t("angle"))}</h3>
-        <p>${escapeHtml(mentor.overall_angle)}</p>
-        ${mentor.ideas.map(idea => `
-          <div class="idea">
-            <span class="badge">${escapeHtml(localIdeaType(idea.type))} · ${escapeHtml(localDifficulty(idea.difficulty))}</span>
-            <h3>${escapeHtml(idea.title)}</h3>
-            <p>${escapeHtml(idea.direction)}</p>
-            <p><strong>${escapeHtml(t("forWhom"))}</strong>${escapeHtml(idea.for_whom)}</p>
-            <ul>${idea.minimum_steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ul>
-            <p><strong>${escapeHtml(t("capability"))}</strong>${escapeHtml(idea.ai_capability)}</p>
-            <p><strong>${escapeHtml(t("useful"))}</strong>${escapeHtml(idea.why_this_is_useful)}</p>
-          </div>
-        `).join("")}
-        <h3>${escapeHtml(t("pitfalls"))}</h3>
-        <ul>${mentor.pitfalls.map(pitfall => `<li><strong>${escapeHtml(localPlatform(pitfall.platform))}${state.language === "en" ? ":" : "："}</strong>${escapeHtml(pitfall.symptom)}${state.language === "en" ? "; " : "；"}${escapeHtml(pitfall.fix)}</li>`).join("")}</ul>
-      `;
-      document.querySelector("#favoriteDetail").addEventListener("click", () => toggleFavorite(repo));
-      document.querySelector("#copyMarkdown").addEventListener("click", copyCurrentMarkdown);
-      document.querySelector("#regenerate").addEventListener("click", () => analyzeRepo(repo, true));
-    }
-
-    async function readError(response) {
-      const text = await response.text();
-      if (!text) return response.statusText;
-      try {
-        const data = JSON.parse(text);
-        return data.detail || response.statusText;
-      } catch {
-        return text;
-      }
-    }
-
-    async function loadFavorites() {
-      try {
-        const response = await fetch("/api/favorites");
-        if (!response.ok) return;
-        const favorites = await response.json();
-        state.favorites = new Map(favorites.map(repo => [repo.name, repo]));
-        if (state.repos.length || state.showFavoritesOnly) renderRepos();
-      } catch {}
-    }
-
-    async function toggleFavorite(repo) {
-      const isFavorite = state.favorites.has(repo.name);
-      const url = isFavorite ? `/api/favorites/${encodeURIComponent(repo.name)}` : "/api/favorites";
-      const options = isFavorite
-        ? {method: "DELETE"}
-        : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({repo})};
-      const response = await fetch(url, options);
-      if (!response.ok) throw new Error(await readError(response));
-      const favorites = await response.json();
-      state.favorites = new Map(favorites.map(item => [item.name, item]));
-      if (state.currentResult?.repo?.name === repo.name) renderDetail(state.currentResult);
-      renderRepos();
-    }
-
-    async function copyCurrentMarkdown() {
-      if (!state.currentResult) return;
-      const markdown = state.currentResult.markdown_export || "";
-      await navigator.clipboard.writeText(markdown);
-      const button = document.querySelector("#copyMarkdown");
-      if (button) {
-        const original = button.textContent;
-        button.textContent = t("copied");
-        setTimeout(() => { button.textContent = original; }, 1200);
-      }
-    }
-
-    async function exportMarkdown() {
-      const analyses = Array.from(state.analysisCache.values());
-      const response = await fetch("/api/export/markdown", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({repos: state.repos, analyses, ui_language: state.language})
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = await response.json();
-      const blob = new Blob([data.markdown], {type: "text/markdown;charset=utf-8"});
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "github-diy-mentor-export.md";
-      link.click();
-      URL.revokeObjectURL(url);
-    }
-
-    discoverButton.addEventListener("click", () => discover());
-    previousBatchButton.addEventListener("click", showPreviousBatch);
-    nextBatchButton.addEventListener("click", showNextBatch);
-    favoritesToggle.addEventListener("click", () => {
-      state.showFavoritesOnly = !state.showFavoritesOnly;
-      favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
-      renderRepos();
-    });
-    exportButton.addEventListener("click", exportMarkdown);
-    document.querySelector("#query").addEventListener("keydown", event => {
-      if (event.key === "Enter") discover();
-    });
-    document.querySelectorAll(".filter-row").forEach(row => {
-      const key = row.dataset.filter;
-      row.querySelectorAll(".chip").forEach(chip => {
-        chip.addEventListener("click", () => {
-          state[key] = chip.dataset.value;
-          row.querySelectorAll(".chip").forEach(item => item.classList.remove("active"));
-          chip.classList.add("active");
-          discover();
-        });
-      });
-    });
-    document.querySelectorAll(".lang-toggle").forEach(button => {
-      button.addEventListener("click", event => {
-        event.preventDefault();
-        state.language = button.dataset.lang;
-        document.querySelectorAll(".lang-toggle").forEach(item => item.classList.remove("active"));
-        button.classList.add("active");
-        applyLanguage();
-        if (state.repos.length) renderRepos();
-        if (state.selectedName) {
-          const repo = state.repos.find(item => item.name === state.selectedName);
-          if (repo) {
-            analyzeRepo(repo);
-            return;
-          }
-        }
-        detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
-      });
-    });
-
-    function applyLanguage() {
-      document.querySelector("h1").textContent = t("title");
-      document.querySelectorAll("[data-i18n]").forEach(node => {
-        node.textContent = t(node.dataset.i18n);
-      });
-      document.querySelectorAll(".filter-row").forEach(row => {
-        const group = row.dataset.filter;
-        row.querySelectorAll(".chip").forEach(chip => {
-          chip.textContent = chipLabels[state.language][group][chip.dataset.value];
-        });
-      });
-      if (!state.repos.length) {
-        repoList.innerHTML = `<div class="empty">${escapeHtml(t("start"))}</div>`;
-      }
-      favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
-      renderBatchControls();
-    }
-
-    applyLanguage();
-    loadFavorites();
-    renderBatchControls();
-  </script>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
