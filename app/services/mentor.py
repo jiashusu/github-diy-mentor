@@ -6,7 +6,7 @@ import os
 from app.models import AnalysisResult, MentorResult, RepoCandidate
 
 
-MENTOR_SYSTEM_PROMPT = """你是“AI DIY 导师”，目标读者是会使用电脑、愿意折腾开源项目、但不是专业程序员的普通用户。
+MENTOR_SYSTEM_PROMPT_ZH = """你是“AI DIY 导师”，目标读者是会使用电脑、愿意折腾开源项目、但不是专业程序员的普通用户。
 
 你的任务：提出 2-3 个“加入 AI 后更好玩、更实用”的 DIY 改造建议。建议必须具体、可操作、对非专业人士友好，不能只说概念。
 
@@ -33,20 +33,20 @@ MENTOR_SYSTEM_PROMPT = """你是“AI DIY 导师”，目标读者是会使用�
   "overall_angle": "这个项目最值得 AI 改造的方向，用一句话说明",
   "ideas": [
     {
-      "type": "懒人方案 | AI增强版",
+      "type": "Lazy Plan | AI Upgrade",
       "title": "短标题",
       "direction": "改造方向",
       "for_whom": "适合谁和什么生活场景",
       "minimum_steps": ["步骤1", "步骤2", "步骤3"],
       "ai_capability": "需要的 AI 能力",
       "files_or_modules_to_check": ["可能相关的文件或模块"],
-      "difficulty": "低 | 中 | 高",
+      "difficulty": "Low | Medium | High",
       "why_this_is_useful": "为什么这个改造有生活价值"
     }
   ],
   "pitfalls": [
     {
-      "platform": "macOS | Windows | 通用",
+      "platform": "macOS | Windows | General",
       "symptom": "用户可能看到的报错或现象",
       "likely_cause": "可能原因",
       "fix": "普通用户能照做的解决办法"
@@ -54,6 +54,46 @@ MENTOR_SYSTEM_PROMPT = """你是“AI DIY 导师”，目标读者是会使用�
   ]
 }
 """
+
+MENTOR_SYSTEM_PROMPT_EN = """You are an AI DIY mentor for curious non-professional users who can use a computer and want to tinker with open source projects.
+
+Suggest 2-3 practical ways to add AI to the given GitHub project. The suggestions must be specific, grounded in the project, and easy to act on.
+
+Rules:
+1. Write everything in English.
+2. Avoid vague ideas such as "add an AI assistant"; connect every idea to the project's existing behavior.
+3. Include at least one lazy no-code/low-code idea and one AI-enhanced idea.
+4. Include pitfalls for macOS, Windows, API keys, dependency installation, file permissions, Node/Python versions, or similar setup issues.
+5. If the README is not enough, clearly say that this is only an inference from the current README.
+
+Return strict JSON:
+{
+  "overall_angle": "one sentence describing the best AI upgrade direction",
+  "ideas": [
+    {
+      "type": "懒人方案 | AI增强版",
+      "title": "short title",
+      "direction": "upgrade direction",
+      "for_whom": "who this helps and in what daily-life scenario",
+      "minimum_steps": ["step 1", "step 2", "step 3"],
+      "ai_capability": "AI capability needed",
+      "files_or_modules_to_check": ["likely files or modules"],
+      "difficulty": "低 | 中 | 高",
+      "why_this_is_useful": "why this is useful"
+    }
+  ],
+  "pitfalls": [
+    {
+      "platform": "macOS | Windows | 通用",
+      "symptom": "what the user may see",
+      "likely_cause": "likely cause",
+      "fix": "simple fix"
+    }
+  ]
+}
+"""
+
+MENTOR_SYSTEM_PROMPT = MENTOR_SYSTEM_PROMPT_ZH
 
 
 def build_project_context(repo: RepoCandidate, analysis: AnalysisResult | None = None) -> str:
@@ -81,15 +121,19 @@ def build_project_context(repo: RepoCandidate, analysis: AnalysisResult | None =
     )
 
 
-async def generate_mentor_result(repo: RepoCandidate, analysis: AnalysisResult | None = None) -> MentorResult:
+async def generate_mentor_result(
+    repo: RepoCandidate,
+    analysis: AnalysisResult | None = None,
+    ui_language: str = "zh",
+) -> MentorResult:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return fallback_mentor_result(repo, analysis)
+        return fallback_mentor_result(repo, analysis, ui_language)
 
     try:
         from openai import AsyncOpenAI
     except ImportError:
-        return fallback_mentor_result(repo, analysis)
+        return fallback_mentor_result(repo, analysis, ui_language)
 
     client = AsyncOpenAI(api_key=api_key, timeout=30)
     model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -98,7 +142,7 @@ async def generate_mentor_result(repo: RepoCandidate, analysis: AnalysisResult |
             model=model,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": MENTOR_SYSTEM_PROMPT},
+                {"role": "system", "content": MENTOR_SYSTEM_PROMPT_EN if ui_language == "en" else MENTOR_SYSTEM_PROMPT_ZH},
                 {"role": "user", "content": f"项目信息如下：\n{build_project_context(repo, analysis)}"},
             ],
             temperature=0.7,
@@ -106,12 +150,74 @@ async def generate_mentor_result(repo: RepoCandidate, analysis: AnalysisResult |
         content = response.choices[0].message.content or "{}"
         return MentorResult.model_validate_json(content)
     except Exception:
-        return fallback_mentor_result(repo, analysis)
+        return fallback_mentor_result(repo, analysis, ui_language)
 
 
-def fallback_mentor_result(repo: RepoCandidate, analysis: AnalysisResult | None = None) -> MentorResult:
+def fallback_mentor_result(
+    repo: RepoCandidate,
+    analysis: AnalysisResult | None = None,
+    ui_language: str = "zh",
+) -> MentorResult:
     context_note = "基于当前 README 只能推测，建议先确认项目的主要输入和输出位置。"
     original_use = analysis.plain_summary if analysis else (repo.description or repo.name)
+    if ui_language == "en":
+        return MentorResult.model_validate(
+            {
+                "overall_angle": f"Turn {repo.name} into a more intent-aware tool that reduces manual setup and repetitive input.",
+                "ideas": [
+                    {
+                        "type": "Lazy Plan",
+                        "title": "Generate ready-to-use setup templates",
+                        "direction": "Use AI to turn a user's scenario into configuration, labels, or rules without changing core code.",
+                        "for_whom": "Users who want to try the project quickly without studying every configuration option.",
+                        "minimum_steps": [
+                            "Copy the README and example configuration into ChatGPT.",
+                            "Describe your own scenario and constraints.",
+                            "Ask for a ready-to-paste config or checklist.",
+                        ],
+                        "ai_capability": "Text understanding and configuration generation",
+                        "files_or_modules_to_check": ["README.md", "config.example", ".env.example"],
+                        "difficulty": "Low",
+                        "why_this_is_useful": "It removes the first setup barrier and helps users reach a working demo faster.",
+                    },
+                    {
+                        "type": "AI Upgrade",
+                        "title": "Natural-language input layer",
+                        "direction": "Let users describe what they want in plain language, then convert it into the structured data the project already expects.",
+                        "for_whom": "People who regularly record, organize, filter, or automate daily information.",
+                        "minimum_steps": [
+                            "Find the file that handles user input, imports, or classification.",
+                            "Add a small LLM API function that converts text into JSON.",
+                            "Pass that JSON into the existing project logic.",
+                        ],
+                        "ai_capability": "Natural-language understanding and structured extraction",
+                        "files_or_modules_to_check": ["Find the input, import, or classification module first"],
+                        "difficulty": "Medium",
+                        "why_this_is_useful": "Users can use their own words instead of learning the internal data format.",
+                    },
+                ],
+                "pitfalls": [
+                    {
+                        "platform": "General",
+                        "symptom": "AI features do nothing or show authentication failed.",
+                        "likely_cause": "OPENAI_API_KEY is missing or .env is not loaded.",
+                        "fix": "Create .env in the project root, add OPENAI_API_KEY, and restart the server.",
+                    },
+                    {
+                        "platform": "Windows",
+                        "symptom": "python or npm is not recognized.",
+                        "likely_cause": "Python or Node was not added to PATH.",
+                        "fix": "Reinstall Python/Node with PATH enabled, then open a new PowerShell window.",
+                    },
+                    {
+                        "platform": "macOS",
+                        "symptom": "Dependency installation reports permission denied.",
+                        "likely_cause": "Dependencies are being installed into the system Python.",
+                        "fix": "Create and activate a virtual environment before installing dependencies.",
+                    },
+                ],
+            }
+        )
     return MentorResult.model_validate(
         {
             "overall_angle": f"把“{original_use}”升级成能理解用户真实意图的半自动生活工具。",

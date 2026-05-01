@@ -15,6 +15,8 @@ class RepoCandidate(BaseModel):
     name: str
     url: HttpUrl
     description: str | None = None
+    description_en: str | None = None
+    description_zh: str | None = None
     homepage_url: HttpUrl | None = None
     language: str | None = None
     topics: list[str] = Field(default_factory=list)
@@ -32,6 +34,7 @@ class AnalyzeRequest(BaseModel):
 
 
 class AnalysisResult(BaseModel):
+    language: Literal["zh", "en"] = "zh"
     plain_summary: str
     difficulty_score: int = Field(ge=1, le=10)
     macos_requirements: list[str]
@@ -41,19 +44,19 @@ class AnalysisResult(BaseModel):
 
 
 class MentorIdea(BaseModel):
-    type: Literal["懒人方案", "AI增强版"]
+    type: Literal["懒人方案", "AI增强版", "Lazy Plan", "AI Upgrade"]
     title: str
     direction: str
     for_whom: str
     minimum_steps: list[str]
     ai_capability: str
     files_or_modules_to_check: list[str]
-    difficulty: Literal["低", "中", "高"]
+    difficulty: Literal["低", "中", "高", "Low", "Medium", "High"]
     why_this_is_useful: str
 
 
 class Pitfall(BaseModel):
-    platform: Literal["macOS", "Windows", "通用"]
+    platform: Literal["macOS", "Windows", "通用", "General"]
     symptom: str
     likely_cause: str
     fix: str
@@ -72,12 +75,14 @@ class MentorRequest(BaseModel):
 
 class FullAnalysisRequest(BaseModel):
     repo: RepoCandidate
+    ui_language: Literal["zh", "en"] = "zh"
 
 
 class FullAnalysisResult(BaseModel):
     repo: RepoCandidate
     analysis: AnalysisResult
     mentor: MentorResult
+    cached: bool = False
 
 
 class ErrorMessage(BaseModel):

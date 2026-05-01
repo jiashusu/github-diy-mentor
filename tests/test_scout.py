@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.services.github_scout import count_recent_stars, looks_life_useful, normalize_search_terms, summarize_repo
+from app.services.github_scout import _sort_score, count_recent_stars, looks_life_useful, normalize_search_terms, summarize_repo
 
 
 def repo_fixture(**overrides):
@@ -56,3 +56,10 @@ def test_chinese_keyword_expands_to_github_terms():
     terms = normalize_search_terms("整理衣柜")
     assert "wardrobe" in terms
     assert "closet" in terms
+
+
+def test_sort_modes_score_expected_signals():
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    summary = summarize_repo(repo_fixture(description="ESP32 smart home sensor dashboard"), since)
+    assert _sort_score(summary, "stars") == summary.stars_total
+    assert _sort_score(summary, "hardware") > summary.trend_score

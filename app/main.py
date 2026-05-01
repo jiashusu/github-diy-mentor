@@ -16,9 +16,11 @@ from app.models import (
     MentorResult,
     RepoCandidate,
 )
+from app.services.cache import get_cached_analysis, set_cached_analysis
 from app.services.analyst import analyze_repo
 from app.services.github_scout import GitHubScoutError, discover_repositories
 from app.services.mentor import fallback_mentor_result, generate_mentor_result
+from app.services.translation import translate_short_texts
 import httpx
 
 
@@ -41,9 +43,32 @@ async def discover(
     days: int = Query(default=7, ge=1, le=30),
     limit: int = Query(default=20, ge=1, le=50),
     q: str | None = Query(default=None, max_length=80),
+    ui_language: str = Query(default="zh", pattern="^(zh|en)$"),
+    language_filter: str = Query(default="all", pattern="^(all|zh|en|other)$"),
+    topic_filter: str = Query(default="all", pattern="^(all|ai|finance|home|media|game|productivity|humanities)$"),
+    sort_mode: str = Query(default="trending", pattern="^(trending|stars|beginner|hardware|software)$"),
 ) -> list[RepoCandidate]:
     try:
-        return await discover_repositories(days=days, limit=limit, keyword=q)
+        repos = await discover_repositories(
+            days=days,
+            limit=limit,
+            keyword=q,
+            language_filter=language_filter,
+            topic_filter=topic_filter,
+            sort_mode=sort_mode,
+        )
+        if ui_language == "zh":
+            translations = await translate_short_texts(
+                {repo.name: repo.description or "" for repo in repos if repo.description},
+                "zh",
+            )
+            for repo in repos:
+                repo.description_en = repo.description
+                repo.description_zh = translations.get(repo.name) or repo.description
+        else:
+            for repo in repos:
+                repo.description_en = repo.description
+        return repos
     except GitHubScoutError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -62,13 +87,19 @@ async def mentor(request: MentorRequest) -> MentorResult:
 
 @app.post("/api/full-analysis", response_model=FullAnalysisResult)
 async def full_analysis(request: FullAnalysisRequest) -> FullAnalysisResult:
+    cached = get_cached_analysis(request.repo, request.ui_language)
+    if cached:
+        return cached
+
     try:
-        analysis = analyze_repo(request.repo)
+        analysis = analyze_repo(request.repo, request.ui_language)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"项目基础分析失败：{exc}") from exc
 
     try:
-        mentor_result = await generate_mentor_result(request.repo, analysis)
+        mentor_result = await generate_mentor_result(request.repo, analysis, request.ui_language)
     except Exception:
-        mentor_result = fallback_mentor_result(request.repo, analysis)
-    return FullAnalysisResult(repo=request.repo, analysis=analysis, mentor=mentor_result)
+        mentor_result = fallback_mentor_result(request.repo, analysis, request.ui_language)
+    result = FullAnalysisResult(repo=request.repo, analysis=analysis, mentor=mentor_result, cached=False)
+    set_cached_analysis(request.repo, request.ui_language, result)
+    return result

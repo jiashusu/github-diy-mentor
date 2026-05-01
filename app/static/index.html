@@ -81,6 +81,13 @@
       align-items: center;
     }
 
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
     input {
       width: 72px;
       border: 1px solid var(--line);
@@ -120,6 +127,16 @@
     .repo:hover,
     .repo.active {
       background: #eef7f5;
+    }
+
+    .repo.active {
+      border-left: 4px solid var(--accent);
+      padding-left: 10px;
+      background: #e1f3ef;
+    }
+
+    .repo.loading {
+      background: #fff7ed;
     }
 
     .repo strong {
@@ -192,10 +209,54 @@
       min-height: 20px;
     }
 
+    .filters {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 12px 20px 14px;
+      display: grid;
+      gap: 8px;
+      border-top: 1px solid var(--line);
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-label {
+      min-width: 54px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .chip,
+    .lang-toggle {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .chip.active,
+    .lang-toggle.active {
+      border-color: var(--accent);
+      background: #e1f3ef;
+      color: var(--accent);
+    }
+
     @media (max-width: 820px) {
       .bar {
         align-items: flex-start;
         flex-direction: column;
+      }
+      .toolbar {
+        align-items: flex-start;
       }
       main {
         grid-template-columns: 1fr;
@@ -207,11 +268,43 @@
   <header>
     <div class="bar">
       <h1>GitHub 趣事发现器 & AI DIY 导师</h1>
-      <div class="controls">
-        <label>搜索 <input id="query" class="search" type="search" placeholder=""></label>
-        <label>天数 <input id="days" type="number" min="1" max="30" value="7"></label>
-        <label>数量 <input id="limit" type="number" min="1" max="50" value="12"></label>
-        <button id="discover">发现项目</button>
+      <div class="toolbar">
+        <div class="controls">
+          <label><span data-i18n="search">搜索</span> <input id="query" class="search" type="search" placeholder=""></label>
+          <label><span data-i18n="days">天数</span> <input id="days" type="number" min="1" max="30" value="7"></label>
+          <label><span data-i18n="limit">数量</span> <input id="limit" type="number" min="1" max="50" value="12"></label>
+          <button id="discover" data-i18n="discover">发现项目</button>
+          <button class="lang-toggle active" data-lang="zh">中文</button>
+          <button class="lang-toggle" data-lang="en">English</button>
+        </div>
+      </div>
+    </div>
+    <div class="filters">
+      <div class="filter-row" data-filter="language_filter">
+        <span class="filter-label" data-i18n="language">语言</span>
+        <button class="chip active" data-value="all">全部</button>
+        <button class="chip" data-value="zh">中文</button>
+        <button class="chip" data-value="en">英文</button>
+        <button class="chip" data-value="other">其他</button>
+      </div>
+      <div class="filter-row" data-filter="topic_filter">
+        <span class="filter-label" data-i18n="topic">主题</span>
+        <button class="chip active" data-value="all">全部</button>
+        <button class="chip" data-value="ai">AI 灵感</button>
+        <button class="chip" data-value="finance">量化金融</button>
+        <button class="chip" data-value="home">智能家居</button>
+        <button class="chip" data-value="media">创意媒体</button>
+        <button class="chip" data-value="game">极客游戏</button>
+        <button class="chip" data-value="productivity">效率黑客</button>
+        <button class="chip" data-value="humanities">人文探索</button>
+      </div>
+      <div class="filter-row" data-filter="sort_mode">
+        <span class="filter-label" data-i18n="sort">排序</span>
+        <button class="chip active" data-value="trending">黑马榜</button>
+        <button class="chip" data-value="stars">经典榜</button>
+        <button class="chip" data-value="beginner">新手友好</button>
+        <button class="chip" data-value="hardware">硬件项目</button>
+        <button class="chip" data-value="software">纯软工具</button>
       </div>
     </div>
   </header>
@@ -231,7 +324,89 @@
     const repoList = document.querySelector("#repoList");
     const detail = document.querySelector("#detail");
     const discoverButton = document.querySelector("#discover");
+    const state = {
+      language: "zh",
+      language_filter: "all",
+      topic_filter: "all",
+      sort_mode: "trending",
+      repos: [],
+      selectedName: "",
+      loadingName: "",
+      analysisCache: new Map()
+    };
     let selectedName = "";
+
+    const labels = {
+      zh: {
+        title: "GitHub 趣事发现器 & AI DIY 导师",
+        search: "搜索",
+        days: "天数",
+        limit: "数量",
+        discover: "发现项目",
+        language: "语言",
+        topic: "主题",
+        sort: "排序",
+        start: "点击“发现项目”开始。需要先在 `.env` 配置 `GITHUB_TOKEN`。",
+        waiting: "等待选择项目。",
+        discovering: "正在从 GitHub 捞有意思的项目...",
+        noResults: "没有找到合适项目。可以扩大天数或稍后再试。",
+        failed: "发现失败：",
+        analyzing: "正在生成解读和 DIY 建议...",
+        analyzeFailed: "分析失败：",
+        openGithub: "打开 GitHub",
+        summary: "一句话白话简介",
+        difficulty: "上手难度",
+        macos: "macOS 门槛",
+        windows: "Windows 门槛",
+        angle: "AI 改造总方向",
+        pitfalls: "避坑指南",
+        capability: "AI 能力：",
+        useful: "为什么有用：",
+        forWhom: "适合：",
+        cached: "已从缓存加载"
+      },
+      en: {
+        title: "GitHub Fun Finder & AI DIY Mentor",
+        search: "Search",
+        days: "Days",
+        limit: "Limit",
+        discover: "Discover",
+        language: "Language",
+        topic: "Topic",
+        sort: "Sort",
+        start: "Click Discover to start. Configure GITHUB_TOKEN in `.env` first.",
+        waiting: "Select a project to see analysis and AI DIY suggestions.",
+        discovering: "Finding interesting GitHub projects...",
+        noResults: "No matching projects found. Try more days or a broader filter.",
+        failed: "Discovery failed: ",
+        analyzing: "Generating analysis and DIY suggestions...",
+        analyzeFailed: "Analysis failed: ",
+        openGithub: "Open GitHub",
+        summary: "Plain-language Summary",
+        difficulty: "Setup Difficulty",
+        macos: "macOS Requirements",
+        windows: "Windows Requirements",
+        angle: "AI Upgrade Direction",
+        pitfalls: "Pitfalls",
+        capability: "AI capability: ",
+        useful: "Why useful: ",
+        forWhom: "For: ",
+        cached: "Loaded from cache"
+      }
+    };
+
+    const chipLabels = {
+      zh: {
+        language_filter: {all: "全部", zh: "中文", en: "英文", other: "其他"},
+        topic_filter: {all: "全部", ai: "AI 灵感", finance: "量化金融", home: "智能家居", media: "创意媒体", game: "极客游戏", productivity: "效率黑客", humanities: "人文探索"},
+        sort_mode: {trending: "黑马榜", stars: "经典榜", beginner: "新手友好", hardware: "硬件项目", software: "纯软工具"}
+      },
+      en: {
+        language_filter: {all: "All", zh: "Chinese", en: "English", other: "Other"},
+        topic_filter: {all: "All", ai: "AI Ideas", finance: "Quant Finance", home: "Smart Home", media: "Creative Media", game: "Geek Games", productivity: "Productivity", humanities: "Humanities"},
+        sort_mode: {trending: "Trending", stars: "Most Stars", beginner: "Beginner Friendly", hardware: "Hardware", software: "Software Only"}
+      }
+    };
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -239,18 +414,27 @@
       }[char]));
     }
 
-    function renderRepos(repos) {
+    function t(key) {
+      return labels[state.language][key] || labels.zh[key] || key;
+    }
+
+    function repoDescription(repo) {
+      if (state.language === "zh") return repo.description_zh || repo.description || "暂无简介";
+      return repo.description_en || repo.description || "No description";
+    }
+
+    function renderRepos(repos = state.repos) {
       if (!repos.length) {
-        repoList.innerHTML = '<div class="empty">没有找到合适项目。可以扩大天数或稍后再试。</div>';
+        repoList.innerHTML = `<div class="empty">${escapeHtml(t("noResults"))}</div>`;
         return;
       }
       repoList.innerHTML = repos.map((repo, index) => `
-        <button class="repo ${repo.name === selectedName ? "active" : ""}" data-index="${index}">
+        <button class="repo ${repo.name === state.selectedName ? "active" : ""} ${repo.name === state.loadingName ? "loading" : ""}" data-index="${index}">
           <strong>${escapeHtml(repo.name)}</strong>
-          <p>${escapeHtml(repo.description || "暂无简介")}</p>
+          <p>${escapeHtml(repoDescription(repo))}</p>
           <span class="meta">
             <span>★ ${repo.stars_total}</span>
-            <span>7日 +${repo.stars_last_7d_estimate}</span>
+            <span>${state.language === "zh" ? "7日" : "7d"} +${repo.stars_last_7d_estimate}</span>
             <span>${escapeHtml(repo.language || "Unknown")}</span>
           </span>
         </button>
@@ -262,40 +446,64 @@
 
     async function discover() {
       discoverButton.disabled = true;
-      selectedName = "";
-      repoList.innerHTML = '<div class="empty">正在从 GitHub 捞有意思的项目...</div>';
-      detail.innerHTML = '<div class="empty">等待选择项目。</div>';
+      state.selectedName = "";
+      state.loadingName = "";
+      state.repos = [];
+      repoList.innerHTML = `<div class="empty">${escapeHtml(t("discovering"))}</div>`;
+      detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
       try {
         const days = document.querySelector("#days").value;
         const limit = document.querySelector("#limit").value;
         const rawQuery = document.querySelector("#query").value.trim();
         const query = encodeURIComponent(rawQuery);
-        const url = rawQuery
-          ? `/api/discover?days=${days}&limit=${limit}&q=${query}`
-          : `/api/discover?days=${days}&limit=${limit}`;
+        const params = new URLSearchParams({
+          days,
+          limit,
+          ui_language: state.language,
+          language_filter: state.language_filter,
+          topic_filter: state.topic_filter,
+          sort_mode: state.sort_mode
+        });
+        if (rawQuery) params.set("q", rawQuery);
+        const url = `/api/discover?${params.toString()}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(await readError(response));
-        renderRepos(await response.json());
+        state.repos = await response.json();
+        renderRepos();
       } catch (error) {
-        repoList.innerHTML = `<div class="empty">发现失败：${escapeHtml(error.message)}</div>`;
+        repoList.innerHTML = `<div class="empty">${escapeHtml(t("failed") + error.message)}</div>`;
       } finally {
         discoverButton.disabled = false;
       }
     }
 
     async function analyzeRepo(repo) {
-      selectedName = repo.name;
-      detail.innerHTML = `<h2>${escapeHtml(repo.name)}</h2><p class="status">正在生成解读和 DIY 建议...</p>`;
+      state.selectedName = repo.name;
+      state.loadingName = repo.name;
+      renderRepos();
+      const cacheKey = `${repo.name}|${repo.pushed_at || ""}|${state.language}`;
+      if (state.analysisCache.has(cacheKey)) {
+        state.loadingName = "";
+        renderDetail(state.analysisCache.get(cacheKey));
+        renderRepos();
+        return;
+      }
+      detail.innerHTML = `<h2>${escapeHtml(repo.name)}</h2><p class="status">${escapeHtml(t("analyzing"))}</p>`;
       try {
         const response = await fetch("/api/full-analysis", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({repo})
+          body: JSON.stringify({repo, ui_language: state.language})
         });
         if (!response.ok) throw new Error(await readError(response));
-        renderDetail(await response.json());
+        const result = await response.json();
+        state.analysisCache.set(cacheKey, result);
+        renderDetail(result);
       } catch (error) {
-        detail.innerHTML = `<div class="empty">分析失败：${escapeHtml(error.message)}</div>`;
+        detail.innerHTML = `<div class="empty">${escapeHtml(t("analyzeFailed") + error.message)}</div>`;
+      } finally {
+        state.loadingName = "";
+        renderRepos();
       }
     }
 
@@ -303,29 +511,29 @@
       const {repo, analysis, mentor} = result;
       detail.innerHTML = `
         <h2>${escapeHtml(repo.name)}</h2>
-        <p><a href="${escapeHtml(repo.url)}" target="_blank" rel="noreferrer">打开 GitHub</a></p>
-        <h3>一句话白话简介</h3>
+        <p><a href="${escapeHtml(repo.url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openGithub"))}</a>${result.cached ? ` · <span class="badge">${escapeHtml(t("cached"))}</span>` : ""}</p>
+        <h3>${escapeHtml(t("summary"))}</h3>
         <p>${escapeHtml(analysis.plain_summary)}</p>
-        <h3>上手难度</h3>
+        <h3>${escapeHtml(t("difficulty"))}</h3>
         <p><span class="badge">${analysis.difficulty_score}/10</span></p>
-        <h3>macOS 门槛</h3>
+        <h3>${escapeHtml(t("macos"))}</h3>
         <ul>${analysis.macos_requirements.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <h3>Windows 门槛</h3>
+        <h3>${escapeHtml(t("windows"))}</h3>
         <ul>${analysis.windows_requirements.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <h3>AI 改造总方向</h3>
+        <h3>${escapeHtml(t("angle"))}</h3>
         <p>${escapeHtml(mentor.overall_angle)}</p>
         ${mentor.ideas.map(idea => `
           <div class="idea">
             <span class="badge">${escapeHtml(idea.type)} · ${escapeHtml(idea.difficulty)}</span>
             <h3>${escapeHtml(idea.title)}</h3>
             <p>${escapeHtml(idea.direction)}</p>
-            <p><strong>适合：</strong>${escapeHtml(idea.for_whom)}</p>
+            <p><strong>${escapeHtml(t("forWhom"))}</strong>${escapeHtml(idea.for_whom)}</p>
             <ul>${idea.minimum_steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ul>
-            <p><strong>AI 能力：</strong>${escapeHtml(idea.ai_capability)}</p>
-            <p><strong>为什么有用：</strong>${escapeHtml(idea.why_this_is_useful)}</p>
+            <p><strong>${escapeHtml(t("capability"))}</strong>${escapeHtml(idea.ai_capability)}</p>
+            <p><strong>${escapeHtml(t("useful"))}</strong>${escapeHtml(idea.why_this_is_useful)}</p>
           </div>
         `).join("")}
-        <h3>避坑指南</h3>
+        <h3>${escapeHtml(t("pitfalls"))}</h3>
         <ul>${mentor.pitfalls.map(pitfall => `<li><strong>${escapeHtml(pitfall.platform)}：</strong>${escapeHtml(pitfall.symptom)}；${escapeHtml(pitfall.fix)}</li>`).join("")}</ul>
       `;
     }
@@ -345,6 +553,46 @@
     document.querySelector("#query").addEventListener("keydown", event => {
       if (event.key === "Enter") discover();
     });
+    document.querySelectorAll(".filter-row").forEach(row => {
+      const key = row.dataset.filter;
+      row.querySelectorAll(".chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+          state[key] = chip.dataset.value;
+          row.querySelectorAll(".chip").forEach(item => item.classList.remove("active"));
+          chip.classList.add("active");
+          discover();
+        });
+      });
+    });
+    document.querySelectorAll(".lang-toggle").forEach(button => {
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        state.language = button.dataset.lang;
+        document.querySelectorAll(".lang-toggle").forEach(item => item.classList.remove("active"));
+        button.classList.add("active");
+        applyLanguage();
+        if (state.repos.length) renderRepos();
+        if (!state.selectedName) detail.innerHTML = `<div class="empty">${escapeHtml(t("waiting"))}</div>`;
+      });
+    });
+
+    function applyLanguage() {
+      document.querySelector("h1").textContent = t("title");
+      document.querySelectorAll("[data-i18n]").forEach(node => {
+        node.textContent = t(node.dataset.i18n);
+      });
+      document.querySelectorAll(".filter-row").forEach(row => {
+        const group = row.dataset.filter;
+        row.querySelectorAll(".chip").forEach(chip => {
+          chip.textContent = chipLabels[state.language][group][chip.dataset.value];
+        });
+      });
+      if (!state.repos.length) {
+        repoList.innerHTML = `<div class="empty">${escapeHtml(t("start"))}</div>`;
+      }
+    }
+
+    applyLanguage();
   </script>
 </body>
 </html>

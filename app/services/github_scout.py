@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -18,6 +19,20 @@ TOPICS = [
     "home-automation",
     "creative-computing",
 ]
+
+TOPIC_FILTER_TERMS = {
+    "all": [],
+    "ai": ["ai", "llm", "agent", "automation"],
+    "finance": ["finance", "trading", "quant", "market"],
+    "home": ["home automation", "home-assistant", "iot", "smart home"],
+    "media": ["photo", "video", "music", "media"],
+    "game": ["game", "gaming", "emulator", "valorant"],
+    "productivity": ["productivity", "todo", "notes", "organizer"],
+    "humanities": ["knowledge", "wiki", "research", "social data"],
+}
+
+HARDWARE_TERMS = ["esp32", "raspberry pi", "arduino", "sensor", "mqtt", "camera", "iot", "hardware"]
+SOFTWARE_ONLY_TERMS = ["web", "desktop", "cli", "python", "node", "browser", "app"]
 
 EXCLUDE_KEYWORDS = [
     "compiler",
@@ -213,6 +228,7 @@ def summarize_repo(repo: dict[str, Any], since: datetime, search_terms: list[str
         name=repo["nameWithOwner"],
         url=normalize_url(repo.get("url")) or repo["url"],
         description=repo.get("description"),
+        description_en=repo.get("description"),
         homepage_url=normalize_url(repo.get("homepageUrl")),
         language=(repo.get("primaryLanguage") or {}).get("name"),
         topics=topics,
@@ -236,10 +252,12 @@ async def _search_topic(
     per_topic: int,
     since: datetime,
     search_terms: list[str] | None = None,
+    language_filter: str = "all",
 ) -> list[RepoCandidate]:
     pushed_after = since.date().isoformat()
     keyword_part = search_terms[0] if search_terms else ""
-    query = f"{keyword_part} topic:{topic} archived:false fork:false stars:>20 pushed:>={pushed_after}".strip()
+    language_part = _language_query_part(language_filter)
+    query = f"{keyword_part} topic:{topic} {language_part} archived:false fork:false stars:>20 pushed:>={pushed_after}".strip()
     response = await client.post(
         GITHUB_GRAPHQL_URL,
         headers=_headers(),
@@ -258,6 +276,8 @@ async def _search_topic(
     for repo in payload["data"]["search"]["nodes"]:
         if not repo or repo.get("isArchived") or repo.get("isFork"):
             continue
+        if not _matches_language_filter(repo, language_filter):
+            continue
         if not looks_life_useful(repo, search_terms):
             continue
         candidates.append(summarize_repo(repo, since, search_terms))
@@ -270,8 +290,10 @@ async def _search_keyword(
     per_topic: int,
     since: datetime,
     search_terms: list[str],
+    language_filter: str = "all",
 ) -> list[RepoCandidate]:
-    query = f"{term} archived:false fork:false stars:>10"
+    language_part = _language_query_part(language_filter)
+    query = f"{term} {language_part} archived:false fork:false stars:>10"
     response = await client.post(
         GITHUB_GRAPHQL_URL,
         headers=_headers(),
@@ -290,6 +312,8 @@ async def _search_keyword(
     for repo in payload["data"]["search"]["nodes"]:
         if not repo or repo.get("isArchived") or repo.get("isFork"):
             continue
+        if not _matches_language_filter(repo, language_filter):
+            continue
         if not looks_life_useful(repo, search_terms):
             continue
         candidates.append(summarize_repo(repo, since, search_terms))
@@ -301,18 +325,25 @@ async def discover_repositories(
     limit: int = 20,
     per_topic: int = 20,
     keyword: str | None = None,
+    language_filter: str = "all",
+    topic_filter: str = "all",
+    sort_mode: str = "trending",
 ) -> list[RepoCandidate]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    search_terms = normalize_search_terms(keyword)
+    search_terms = _dedupe_terms([*normalize_search_terms(keyword), *TOPIC_FILTER_TERMS.get(topic_filter, [])])
     async with httpx.AsyncClient() as client:
-        batches = await _run_topic_searches(client, since, per_topic, search_terms)
+        batches = await _run_topic_searches(client, since, per_topic, search_terms, language_filter)
 
     by_name: dict[str, RepoCandidate] = {}
     for batch in batches:
         for repo in batch:
             by_name[repo.name] = repo
 
-    return sorted(by_name.values(), key=lambda item: item.trend_score, reverse=True)[:limit]
+    return sorted(
+        by_name.values(),
+        key=lambda item: _sort_score(item, sort_mode),
+        reverse=True,
+    )[:limit]
 
 
 async def _run_topic_searches(
@@ -320,14 +351,15 @@ async def _run_topic_searches(
     since: datetime,
     per_topic: int,
     search_terms: list[str] | None = None,
+    language_filter: str = "all",
 ) -> list[list[RepoCandidate]]:
     import asyncio
 
     results = await asyncio.gather(
         *[
-            *[_search_topic(client, topic, per_topic, since, search_terms) for topic in TOPICS],
+            *[_search_topic(client, topic, per_topic, since, search_terms, language_filter) for topic in TOPICS],
             *[
-                _search_keyword(client, term, per_topic, since, search_terms)
+                _search_keyword(client, term, per_topic, since, search_terms, language_filter)
                 for term in (search_terms or [])[:3]
             ],
         ],
@@ -346,6 +378,42 @@ async def _run_topic_searches(
     if errors:
         raise GitHubScoutError("; ".join(errors))
     return []
+
+
+def _language_query_part(language_filter: str) -> str:
+    return ""
+
+
+def _matches_language_filter(repo: dict[str, Any], language_filter: str) -> bool:
+    if language_filter == "all":
+        return True
+    text = _repo_text(repo)
+    has_cjk = bool(re.search(r"[\u3400-\u9fff]", text))
+    primary_language = ((repo.get("primaryLanguage") or {}).get("name") or "").lower()
+    if language_filter == "zh":
+        return has_cjk
+    if language_filter == "en":
+        return not has_cjk
+    if language_filter == "other":
+        return primary_language not in {"python", "typescript", "javascript", "go", "rust", "java", "c++", "c#", "swift", "kotlin"}
+    return True
+
+
+def _sort_score(repo: RepoCandidate, sort_mode: str) -> float:
+    text = " ".join([repo.description or "", repo.files.readme[:5000], " ".join(repo.topics)]).lower()
+    if sort_mode == "stars":
+        return float(repo.stars_total)
+    if sort_mode == "beginner":
+        dependency_penalty = len(repo.files.requirements_txt.splitlines()) * 0.2 + len(repo.files.package_json) / 3000
+        docker_bonus = 4 if "docker" in text else 0
+        return 30 + docker_bonus + repo.has_visual_signal * 5 - dependency_penalty + repo.stars_last_7d_estimate
+    if sort_mode == "hardware":
+        return repo.trend_score + sum(12 for term in HARDWARE_TERMS if term in text)
+    if sort_mode == "software":
+        hardware_penalty = sum(10 for term in HARDWARE_TERMS if term in text)
+        software_bonus = sum(6 for term in SOFTWARE_ONLY_TERMS if term in text)
+        return repo.trend_score + software_bonus - hardware_penalty
+    return repo.trend_score
 
 
 def _dedupe_terms(terms: list[str]) -> list[str]:
