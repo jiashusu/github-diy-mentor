@@ -31,6 +31,9 @@ TOPIC_FILTER_TERMS = {
     "humanities": ["knowledge", "wiki", "research", "social data"],
 }
 
+LANGUAGE_FILTER_VALUES = {"all", "zh", "en", "other"}
+TOPIC_FILTER_VALUES = set(TOPIC_FILTER_TERMS)
+
 HARDWARE_TERMS = ["esp32", "raspberry pi", "arduino", "sensor", "mqtt", "camera", "iot", "hardware"]
 SOFTWARE_ONLY_TERMS = ["web", "desktop", "cli", "python", "node", "browser", "app"]
 
@@ -258,7 +261,7 @@ async def _search_topic(
     per_topic: int,
     since: datetime,
     search_terms: list[str] | None = None,
-    language_filter: str = "all",
+    language_filter: str | list[str] = "all",
 ) -> list[RepoCandidate]:
     pushed_after = since.date().isoformat()
     keyword_part = search_terms[0] if search_terms else ""
@@ -296,7 +299,7 @@ async def _search_keyword(
     per_topic: int,
     since: datetime,
     search_terms: list[str],
-    language_filter: str = "all",
+    language_filter: str | list[str] = "all",
 ) -> list[RepoCandidate]:
     language_part = _language_query_part(language_filter)
     query = f"{term} {language_part} archived:false fork:false stars:>10"
@@ -331,16 +334,23 @@ async def discover_repositories(
     limit: int = 20,
     per_topic: int = 20,
     keyword: str | None = None,
-    language_filter: str = "all",
-    topic_filter: str = "all",
+    language_filter: str | list[str] = "all",
+    topic_filter: str | list[str] = "all",
     sort_mode: str = "trending",
     exclude_names: set[str] | None = None,
 ) -> list[RepoCandidate]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    search_terms = _dedupe_terms([*normalize_search_terms(keyword), *TOPIC_FILTER_TERMS.get(topic_filter, [])])
+    language_filters = normalize_filter_values(language_filter, LANGUAGE_FILTER_VALUES)
+    topic_filters = normalize_filter_values(topic_filter, TOPIC_FILTER_VALUES)
+    topic_terms = [
+        term
+        for topic in topic_filters
+        for term in TOPIC_FILTER_TERMS.get(topic, [])
+    ]
+    search_terms = _dedupe_terms([*normalize_search_terms(keyword), *topic_terms])
     async with httpx.AsyncClient() as client:
         fetch_size = max(per_topic, min(50, limit + len(exclude_names or set())))
-        batches = await _run_topic_searches(client, since, fetch_size, search_terms, language_filter)
+        batches = await _run_topic_searches(client, since, fetch_size, search_terms, language_filters)
 
     by_name: dict[str, RepoCandidate] = {}
     excluded = exclude_names or set()
@@ -362,7 +372,7 @@ async def _run_topic_searches(
     since: datetime,
     per_topic: int,
     search_terms: list[str] | None = None,
-    language_filter: str = "all",
+    language_filter: str | list[str] = "all",
 ) -> list[list[RepoCandidate]]:
     import asyncio
 
@@ -391,23 +401,35 @@ async def _run_topic_searches(
     return []
 
 
-def _language_query_part(language_filter: str) -> str:
+def _language_query_part(language_filter: str | list[str]) -> str:
     return ""
 
 
-def _matches_language_filter(repo: dict[str, Any], language_filter: str) -> bool:
-    if language_filter == "all":
+def normalize_filter_values(value: str | list[str] | tuple[str, ...] | set[str], allowed: set[str]) -> list[str]:
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    else:
+        raw_values = list(value)
+    values = [item.strip() for item in raw_values if item and item.strip() in allowed]
+    if not values or "all" in values:
+        return ["all"]
+    return sorted(set(values))
+
+
+def _matches_language_filter(repo: dict[str, Any], language_filter: str | list[str]) -> bool:
+    filters = normalize_filter_values(language_filter, LANGUAGE_FILTER_VALUES)
+    if filters == ["all"]:
         return True
     text = _repo_text(repo)
     has_cjk = bool(re.search(r"[\u3400-\u9fff]", text))
     primary_language = ((repo.get("primaryLanguage") or {}).get("name") or "").lower()
-    if language_filter == "zh":
-        return has_cjk
-    if language_filter == "en":
-        return not has_cjk
-    if language_filter == "other":
+    if "zh" in filters and has_cjk:
+        return True
+    if "en" in filters and not has_cjk:
+        return True
+    if "other" in filters:
         return primary_language not in {"python", "typescript", "javascript", "go", "rust", "java", "c++", "c#", "swift", "kotlin"}
-    return True
+    return False
 
 
 def _sort_score(repo: RepoCandidate, sort_mode: str) -> float:

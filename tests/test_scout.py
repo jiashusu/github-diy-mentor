@@ -3,7 +3,18 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from app.services.github_scout import _sort_score, count_recent_stars, discover_repositories, looks_life_useful, normalize_search_terms, summarize_repo
+from app.services.github_scout import (
+    LANGUAGE_FILTER_VALUES,
+    TOPIC_FILTER_VALUES,
+    _matches_language_filter,
+    _sort_score,
+    count_recent_stars,
+    discover_repositories,
+    looks_life_useful,
+    normalize_filter_values,
+    normalize_search_terms,
+    summarize_repo,
+)
 
 
 def repo_fixture(**overrides):
@@ -82,3 +93,35 @@ def test_discover_excludes_seen_repositories(monkeypatch):
     repos = asyncio.run(discover_repositories(limit=2, exclude_names={"demo/first"}))
 
     assert [repo.name for repo in repos] == ["demo/second"]
+
+
+def test_normalizes_multi_select_filters():
+    assert normalize_filter_values("zh,en", LANGUAGE_FILTER_VALUES) == ["en", "zh"]
+    assert normalize_filter_values("all,zh", LANGUAGE_FILTER_VALUES) == ["all"]
+    assert normalize_filter_values("bad", TOPIC_FILTER_VALUES) == ["all"]
+
+
+def test_multi_topic_filters_merge_keywords(monkeypatch):
+    captured = {}
+
+    async def fake_run_topic_searches(client, since, per_topic, search_terms, language_filter):
+        captured["search_terms"] = search_terms
+        captured["language_filter"] = language_filter
+        return [[]]
+
+    monkeypatch.setattr("app.services.github_scout._run_topic_searches", fake_run_topic_searches)
+
+    asyncio.run(discover_repositories(topic_filter=["ai", "home"], language_filter=["zh", "en"]))
+
+    assert "llm" in captured["search_terms"]
+    assert "smart home" in captured["search_terms"]
+    assert captured["language_filter"] == ["en", "zh"]
+
+
+def test_multi_language_filter_uses_or_semantics():
+    chinese_repo = repo_fixture(description="中文 家庭自动化")
+    english_repo = repo_fixture(description="Home automation dashboard")
+
+    assert _matches_language_filter(chinese_repo, ["zh", "en"]) is True
+    assert _matches_language_filter(english_repo, ["zh", "en"]) is True
+    assert _matches_language_filter(chinese_repo, ["en"]) is False

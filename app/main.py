@@ -31,7 +31,13 @@ from app.services.cache import (
 )
 from app.services.analyst import analyze_repo
 from app.services.exporter import analysis_to_markdown, export_session_markdown
-from app.services.github_scout import GitHubScoutError, discover_repositories
+from app.services.github_scout import (
+    GitHubScoutError,
+    LANGUAGE_FILTER_VALUES,
+    TOPIC_FILTER_VALUES,
+    discover_repositories,
+    normalize_filter_values,
+)
 from app.services.github_scout import recommendation_summary as build_recommendation_summary
 from app.services.mentor import fallback_mentor_result, generate_mentor_result
 from app.services.translation import translate_short_texts
@@ -66,20 +72,22 @@ async def discover(
     limit: int = Query(default=20, ge=1, le=50),
     q: str | None = Query(default=None, max_length=80),
     ui_language: str = Query(default="zh", pattern="^(zh|en)$"),
-    language_filter: str = Query(default="all", pattern="^(all|zh|en|other)$"),
-    topic_filter: str = Query(default="all", pattern="^(all|ai|finance|home|media|game|productivity|humanities)$"),
+    language_filter: str = Query(default="all"),
+    topic_filter: str = Query(default="all"),
     sort_mode: str = Query(default="trending", pattern="^(trending|stars|beginner|hardware|software)$"),
     exclude: str | None = Query(default=None),
 ) -> list[RepoCandidate]:
     try:
         exclude_names = {name for name in (exclude or "").split(",") if name}
+        language_filters = normalize_filter_values(language_filter, LANGUAGE_FILTER_VALUES)
+        topic_filters = normalize_filter_values(topic_filter, TOPIC_FILTER_VALUES)
         cache_params = {
             "days": days,
             "limit": limit,
             "q": q or "",
             "ui_language": ui_language,
-            "language_filter": language_filter,
-            "topic_filter": topic_filter,
+            "language_filter": language_filters,
+            "topic_filter": topic_filters,
             "sort_mode": sort_mode,
             "exclude": sorted(exclude_names),
         }
@@ -89,8 +97,8 @@ async def discover(
                 days=days,
                 limit=limit,
                 keyword=q,
-                language_filter=language_filter,
-                topic_filter=topic_filter,
+                language_filter=language_filters,
+                topic_filter=topic_filters,
                 sort_mode=sort_mode,
                 exclude_names=exclude_names,
             )

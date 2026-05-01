@@ -22,9 +22,16 @@ const toast = createToastController(document.querySelector("#toastRegion"));
 
 const state = {
   language: "zh",
-  language_filter: "all",
-  topic_filter: "all",
-  sort_mode: "trending",
+  draftFilters: {
+    language_filter: ["all"],
+    topic_filter: ["all"],
+    sort_mode: "trending",
+  },
+  appliedFilters: {
+    language_filter: ["all"],
+    topic_filter: ["all"],
+    sort_mode: "trending",
+  },
   repos: [],
   pages: [],
   pageIndex: -1,
@@ -50,6 +57,24 @@ function escapeHtml(value) {
 
 function t(key) {
   return labels[state.language][key] || labels.zh[key] || key;
+}
+
+function selectedValues(key, source = state.draftFilters) {
+  const value = source[key];
+  return Array.isArray(value) ? value : [value];
+}
+
+function filterParam(key) {
+  const value = state.appliedFilters[key];
+  return Array.isArray(value) ? value.join(",") : value;
+}
+
+function copyDraftToApplied() {
+  state.appliedFilters = {
+    language_filter: [...state.draftFilters.language_filter],
+    topic_filter: [...state.draftFilters.topic_filter],
+    sort_mode: state.draftFilters.sort_mode,
+  };
 }
 
 function displayedRepos() {
@@ -90,10 +115,9 @@ function renderRepos(repos = displayedRepos()) {
       discover();
     });
     document.querySelector("#resetTopic")?.addEventListener("click", () => {
-      state.topic_filter = "all";
-      document.querySelectorAll('[data-filter="topic_filter"] .chip').forEach(chip => {
-        chip.classList.toggle("active", chip.dataset.value === "all");
-      });
+      state.draftFilters.topic_filter = ["all"];
+      copyDraftToApplied();
+      renderFilterChips();
       discover();
     });
     renderPageNav();
@@ -145,6 +169,7 @@ function allSeenNames() {
 
 async function discover(options = {}) {
   const appendPage = options.appendPage || false;
+  if (!appendPage) copyDraftToApplied();
   discoverButton.disabled = true;
   state.selectedName = "";
   state.loadingName = "";
@@ -166,9 +191,9 @@ async function discover(options = {}) {
       days: document.querySelector("#days").value,
       limit: document.querySelector("#limit").value,
       ui_language: state.language,
-      language_filter: state.language_filter,
-      topic_filter: state.topic_filter,
-      sort_mode: state.sort_mode,
+      language_filter: filterParam("language_filter"),
+      topic_filter: filterParam("topic_filter"),
+      sort_mode: filterParam("sort_mode"),
     });
     const rawQuery = document.querySelector("#query").value.trim();
     if (rawQuery) params.set("q", rawQuery);
@@ -388,17 +413,27 @@ function applyLanguage() {
   document.querySelectorAll("[data-i18n]").forEach(node => {
     node.textContent = t(node.dataset.i18n);
   });
-  document.querySelectorAll(".filter-row").forEach(row => {
-    const group = row.dataset.filter;
-    row.querySelectorAll(".chip").forEach(chip => {
-      chip.textContent = chipLabels[state.language][group][chip.dataset.value];
-    });
-  });
+  renderFilterChips();
   if (!state.repos.length) {
     repoList.innerHTML = `<div class="empty">${escapeHtml(t("start"))}</div>`;
   }
   favoritesToggle.textContent = state.showFavoritesOnly ? t("allResults") : t("favoritesOnly");
   renderPageNav();
+}
+
+function renderFilterChips() {
+  document.querySelectorAll(".filter-row").forEach(row => {
+    const group = row.dataset.filter;
+    row.querySelectorAll(".chip").forEach(chip => {
+      const value = chip.dataset.value;
+      const selected = selectedValues(group).includes(value);
+      chip.classList.toggle("active", selected);
+      chip.innerHTML = `
+        <span class="chip-label">${escapeHtml(chipLabels[state.language][group][value])}</span>
+        ${selected && value !== "all" && group !== "sort_mode" ? `<span class="chip-remove" aria-hidden="true">x</span>` : ""}
+      `;
+    });
+  });
 }
 
 discoverButton.addEventListener("click", () => discover());
@@ -414,14 +449,34 @@ document.querySelector("#query").addEventListener("keydown", event => {
 document.querySelectorAll(".filter-row").forEach(row => {
   const key = row.dataset.filter;
   row.querySelectorAll(".chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      state[key] = chip.dataset.value;
-      row.querySelectorAll(".chip").forEach(item => item.classList.remove("active"));
-      chip.classList.add("active");
-      discover();
+    chip.addEventListener("click", event => {
+      event.preventDefault();
+      updateDraftFilter(key, chip.dataset.value);
+      renderFilterChips();
     });
   });
 });
+
+function updateDraftFilter(key, value) {
+  if (key === "sort_mode") {
+    state.draftFilters.sort_mode = value;
+    return;
+  }
+
+  const current = new Set(selectedValues(key));
+  if (value === "all") {
+    state.draftFilters[key] = ["all"];
+    return;
+  }
+
+  current.delete("all");
+  if (current.has(value)) {
+    current.delete(value);
+  } else {
+    current.add(value);
+  }
+  state.draftFilters[key] = current.size ? Array.from(current).sort() : ["all"];
+}
 document.querySelectorAll(".lang-toggle").forEach(button => {
   button.addEventListener("click", event => {
     event.preventDefault();
